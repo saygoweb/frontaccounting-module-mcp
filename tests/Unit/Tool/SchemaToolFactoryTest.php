@@ -3,6 +3,9 @@
 namespace FA\Mcp\Tests\Unit\Tool;
 
 use FA\Mcp\Tests\Support\FakeGraphQlGateway;
+use FA\Mcp\Tool\EscapeHatch\GraphQlMutate;
+use FA\Mcp\Tool\EscapeHatch\GraphQlQuery;
+use FA\Mcp\Tool\EscapeHatch\GraphQlSchema;
 use FA\Mcp\Tool\SchemaToolFactory;
 use FA\Mcp\Tool\Tool;
 use GraphQL\Utils\BuildSchema;
@@ -21,6 +24,22 @@ class SchemaToolFactoryTest extends TestCase
             $byName[$tool->name()] = $tool;
         }
         return $byName;
+    }
+
+    /**
+     * What a client sees of requiresWrite(): exactly the tools not annotated
+     * readOnlyHint, which a read connection's tools/list leaves out. The http
+     * suite relies on it to check that list against the write one.
+     */
+    public function testReadOnlyHintIsExactlyNotRequiringWrite(): void
+    {
+        $tools = array_merge(
+            array_values(self::tools()),
+            [new GraphQlQuery(), new GraphQlMutate(), new GraphQlSchema()]
+        );
+        foreach ($tools as $tool) {
+            $this->assertSame(!$tool->requiresWrite(), $tool->annotations()['readOnlyHint'], $tool->name());
+        }
     }
 
     public function testNamesQueriesThenMutationsEachSorted(): void

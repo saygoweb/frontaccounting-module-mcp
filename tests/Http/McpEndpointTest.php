@@ -54,12 +54,18 @@ class McpEndpointTest extends TestCase
         return self::$read['token'];
     }
 
-    /** @return string[] */
-    private function toolNames(string $token): array
+    /** @return array<int, array<string, mixed>> tools/list's tools */
+    private function tools(string $token): array
     {
         $response = $this->rpc('tools/list', [], $token);
         $this->assertSame(200, $response['status'], $response['raw']);
-        return array_column($response['body']['result']['tools'], 'name');
+        return $response['body']['result']['tools'];
+    }
+
+    /** @return string[] */
+    private function toolNames(string $token): array
+    {
+        return array_column($this->tools($token), 'name');
     }
 
     public function testInitialize(): void
@@ -96,6 +102,20 @@ class McpEndpointTest extends TestCase
         $this->assertNotContains('customer_create', $read);
         $this->assertNotContains('graphql_mutate', $read);
         $this->assertSame([], array_values(array_diff($read, $write)), 'a read list is a subset of the write list');
+
+        // Exactly: the read list is the write list less the tools that need
+        // write, which are the ones not annotated read-only (every mutation
+        // tool and graphql_mutate; every query tool is readOnlyHint).
+        $writeTools = $this->tools(self::writeToken());
+        $readOnly = array_column(array_filter($writeTools, function (array $tool): bool {
+            return ($tool['annotations']['readOnlyHint'] ?? null) === true;
+        }), 'name');
+        $mutations = array_values(array_diff(array_column($writeTools, 'name'), $readOnly));
+        $this->assertContains('customer_create', $mutations);
+        $this->assertContains('graphql_mutate', $mutations);
+        sort($readOnly);
+        sort($read);
+        $this->assertSame($readOnly, $read, 'read list = write list minus the write-only tools');
     }
 
     public function testModernToolsCallCustomerList(): void
