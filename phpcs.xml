@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<ruleset name="FrontAccounting MCP">
+    <description>Coding standard for the FrontAccounting MCP module.</description>
+
+    <rule ref="PSR12"/>
+
+    <file>src</file>
+    <file>tests</file>
+    <!-- hooks.php, index.php, app.php and container.php join this list as they
+         are created: phpcs refuses to run when a named file does not exist. -->
+
+    <exclude-pattern>vendor/*</exclude-pattern>
+
+    <arg value="p"/>
+    <arg name="colors"/>
+    <arg value="s"/>
+</ruleset>

@@ -1,0 +1,59 @@
+{
+    "name": "saygoweb/frontaccounting-module-mcp",
+    "description": "An MCP server for FrontAccounting, delivered as a module, on top of the GraphQL module",
+    "type": "project",
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "cambell",
+            "email": "cambell.prince@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^7.4 || ^8.0",
+        "ext-json": "*",
+        "ext-pdo": "*"
+    },
+    "require-dev": {
+        "php-di/php-di": "^6.0",
+        "phpstan/phpstan": "^1.10",
+        "phpunit/phpunit": "^9.6",
+        "slim/psr7": "^1.6",
+        "slim/slim": "^4.11",
+        "squizlabs/php_codesniffer": "^3.7",
+        "webonyx/graphql-php": "^15.32.3"
+    },
+    "config": {
+        "platform": {
+            "php": "7.4.33"
+        },
+        "sort-packages": true
+    },
+    "autoload": {
+        "psr-4": {
+            "FA\\Mcp\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "FA\\Mcp\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit -c phpunit.xml",
+        "test:coverage": "phpunit -c phpunit.xml --coverage-clover build/coverage.xml --coverage-text",
+        "lint": "find . -name vendor -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l",
+        "cs:check": "phpcs",
+        "cs:fix": "phpcbf",
+        "analyze": "phpstan analyse --no-progress --memory-limit=512M",
+        "quality": [
+            "@lint",
+            "@cs:check",
+            "@analyze"
+        ],
+        "ci": [
+            "@quality",
+            "@test"
+        ]
+    }
+}

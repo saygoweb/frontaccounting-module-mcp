@@ -1,0 +1,5 @@
+/vendor/
+/build/
+/config_mcp.php
+/.phpunit.result.cache
+/.superpowers/

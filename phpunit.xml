@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/9.6/phpunit.xsd"
+	bootstrap="tests/bootstrap.php"
+	colors="true"
+	convertDeprecationsToExceptions="false"
+>
+	<testsuites>
+		<!-- No FrontAccounting, no GraphQL module, no database, no web server. -->
+		<testsuite name="unit">
+			<directory>tests/Unit</directory>
+		</testsuite>
+		<!-- FrontAccounting and the GraphQL module loaded in-process, and the database. Needs the FrontAccounting CI image. -->
+		<testsuite name="integration">
+			<directory>tests/Integration</directory>
+		</testsuite>
+		<!-- Drives Apache over HTTP; needs the FrontAccounting CI image (or an FA install). -->
+		<testsuite name="http">
+			<directory>tests/Http</directory>
+		</testsuite>
+	</testsuites>
+	<php>
+		<!-- McpServer logs unexpected exceptions with error_log(); keep the run output clean. -->
+		<ini name="error_log" value="/dev/null"/>
+	</php>
+	<coverage>
+		<include>
+			<directory suffix=".php">src</directory>
+		</include>
+	</coverage>
+</phpunit>
