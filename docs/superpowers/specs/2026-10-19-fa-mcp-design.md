@@ -7,8 +7,8 @@
   - `saygoweb/frontaccounting-module-graphql` (`modules/graphql`): a supported
     in-process `Executor` and a token scope claim, minor release
   - `cambell-prince/frontaccounting` (`master-cp`): a dev environment file
-    (`docker/ci/dev/mcp.env`); optionally a shared Codecov input on the reusable
-    `plugin-test.yml` (§12)
+    (`docker/ci/dev/mcp.env`) and a shared Codecov upload (`coverage` input,
+    `codecov-token` secret) on the reusable `plugin-test.yml` (§12)
 - **Prior art:** the i-MSCP MCP plugin (`/home/cambell/src/sgw/imscp-mcp`,
   branch `feature/mcp-server`, spec `docs/superpowers/specs/2026-10-19-imscp-mcp-design.md`).
   Its protocol layer is ported; its lessons are cited below as *imscp (x)*.
@@ -557,19 +557,38 @@ and in development through `docker/ci/plugin-dev.sh --env mcp`.
   `XDEBUG_MODE=coverage`, `COMPOSER_ALLOW_XDEBUG=1`, `COMPOSER_PROCESS_TIMEOUT=0`.
   It writes `build/coverage.xml` (Clover); `phpunit.xml` includes `src/`. The
   http suite runs in Apache and is not measured.
-- **Upload, graphql's mechanism:** `ci.yml` has a separate `coverage` job (one
-  cell: fa `cp`, php `8.3`, dataset demo, graphql and sgw_sales alongside) that
-  repeats the reusable workflow's steps (checkout the plugin and FA's
-  `docker/ci` sparsely, composer cache, pull the image, run
-  `fa-ci/docker/ci/plugin-test.sh … plugin -- "sh tools/coverage.sh"`); the
-  plugin checkout is bind-mounted, so `plugin/build/coverage.xml` lands on the
-  runner and `codecov/codecov-action@v5` uploads it with
-  `token: ${{ secrets.CODECOV_TOKEN }}`.
-- **Shared alternative:** with graphql and mcp both needing it, a `coverage`
-  input and `codecov-token` secret on FA's reusable `plugin-test.yml` would
-  replace both copies. The graphql coverage work is raising this with the user;
-  mcp uses it if it exists when mcp's CI is built, and graphql's separate-job
-  pattern otherwise.
+- **Upload, shared in FA's reusable workflow** (decided by the user: several
+  plugins need testing and coverage). `plugin-test.yml` gains:
+  - input `coverage` (string, default `''`): a Clover file path relative to the
+    plugin checkout. When set, a step after *Test* uploads it with
+    `codecov/codecov-action@v5` (`files: plugin/<coverage>`,
+    `fail_ci_if_error: true`, `disable_search: true`). The checkout is
+    bind-mounted, so the file the container wrote is on the runner.
+  - secret `codecov-token` (optional), passed as the action's `token`.
+
+  A plugin's `ci.yml` keeps its test matrix and adds one job that calls the same
+  workflow for coverage:
+
+  ```yaml
+  coverage:
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@master-cp
+    with:
+      fa: cp
+      php: '8.3'
+      dataset: demo
+      setup: composer install --no-interaction --no-progress
+      with: |
+        graphql=https://github.com/saygoweb/frontaccounting-module-graphql.git@<ref>
+        sgw_sales=https://github.com/saygoweb/frontaccounting-module-sgw_sales.git@master
+      test: sh tools/coverage.sh
+      coverage: build/coverage.xml
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+  ```
+
+  The FA change lands once (§13 step 2) and serves graphql, mcp and the other
+  plugins; graphql's coverage work switches to it rather than keeping its own
+  copy of the steps.
 - `codecov.yml`: `fixes: ["/var/www/html/modules/mcp/::"]` (Clover paths are the
   container's), project and patch statuses informational at first.
 - **README badges**, under the H1:
@@ -583,7 +602,8 @@ and in development through `docker/ci/plugin-dev.sh --env mcp`.
 
 1. graphql: `Executor` 1.0, the `scp` claim and `me { scope }`,
    `fa-token --read-only`, tests; released as a minor version.
-2. FA: `docker/ci/dev/mcp.env` (and the shared Codecov input, if the user chooses it).
+2. FA: `docker/ci/dev/mcp.env`; the `coverage` input and `codecov-token` secret on
+   `plugin-test.yml` (shared by every plugin; coordinated with graphql's coverage work).
 3. mcp: protocol port, gateways, generated tools and escape hatch (bearer-only
    end to end), then OAuth, then CI, coverage, badges and docs.
 
