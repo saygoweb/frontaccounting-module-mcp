@@ -1,0 +1,49 @@
+name: CI
+
+# Runs tools/ci.sh in the FrontAccounting CI image (cambell-prince/frontaccounting
+# docker/ci), on FrontAccounting's demo company, with the GraphQL module (which
+# this module requires) and sgw_sales activated first; coverage from one cell.
+
+on:
+  push:
+    branches: [main, 'feature/**', 'fix/**', 'ci/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        fa: [cp, upstream]
+        php: ['7.4', '8.3']
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@master-cp
+    with:
+      fa: ${{ matrix.fa }}
+      php: ${{ matrix.php }}
+      dataset: demo
+      setup: composer install --no-interaction --no-progress
+      with: |
+        sgw_sales=https://github.com/saygoweb/frontaccounting-module-sgw_sales.git@master
+        graphql=https://github.com/saygoweb/frontaccounting-module-graphql.git@feature/executor
+      test: sh tools/ci.sh
+
+  coverage:
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@ci/plugin-coverage
+    with:
+      fa: cp
+      php: '8.3'
+      dataset: demo
+      fa-ref: ci/plugin-coverage
+      setup: composer install --no-interaction --no-progress
+      with: |
+        sgw_sales=https://github.com/saygoweb/frontaccounting-module-sgw_sales.git@master
+        graphql=https://github.com/saygoweb/frontaccounting-module-graphql.git@feature/executor
+      test: sh tools/coverage.sh
+      coverage: build/coverage.xml
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
