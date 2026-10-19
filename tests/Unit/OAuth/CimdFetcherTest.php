@@ -198,4 +198,47 @@ class CimdFetcherTest extends TestCase
             'url' => self::URL, 'pinnedIp' => '93.184.216.34', 'timeout' => 5, 'maxBytes' => 65536
         ]], $this->http->calls);
     }
+
+    /** @return array<string, array{string, string|null}> */
+    public function hostOfCases(): array
+    {
+        return [
+            'plain' => ['https://App.Example/client.json', 'app.example'],
+            'explicit 443' => ['https://app.example:443/c', 'app.example'],
+            'IPv6 literal' => ['https://[2606:2800:220:1::1]/c', '2606:2800:220:1::1'],
+            'http' => ['http://app.example/c', null],
+            'other port' => ['https://app.example:8443/c', null],
+            'userinfo' => ['https://u:p@app.example/c', null],
+            'user only' => ['https://u@app.example/c', null],
+            'no path' => ['https://app.example', null],
+            'root path' => ['https://app.example/', null],
+            'fragment' => ['https://app.example/c#x', null],
+            'space' => ['https://app.example/a b', null],
+            'control character' => ["https://app.example/a\x01", null],
+            'not a URL' => ['client', null],
+        ];
+    }
+
+    /** @dataProvider hostOfCases */
+    public function testHostOf(string $url, ?string $host): void
+    {
+        $this->assertSame($host, CimdFetcher::hostOf($url));
+    }
+
+    public function testDnsAddressesResolvesLocalhostWithoutTheNetwork(): void
+    {
+        $this->assertContains('127.0.0.1', CimdFetcher::dnsAddresses('localhost'));
+    }
+
+    public function testTheDefaultResolverIsDnsAndLoopbackIsRefusedBeforeFetching(): void
+    {
+        $fetcher = new CimdFetcher($this->http);
+        try {
+            $fetcher->fetch('https://localhost/client.json');
+            $this->fail('Expected invalid_client');
+        } catch (OAuthError $e) {
+            $this->assertSame('invalid_client', $e->error());
+        }
+        $this->assertSame([], $this->http->calls);
+    }
 }
