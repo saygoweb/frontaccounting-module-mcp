@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS `0_mcp_oauth_code` (
   `resource` varchar(512) NOT NULL DEFAULT '',
   `expires_at` datetime NOT NULL,
   `used_at` datetime DEFAULT NULL,
+  `replayed_at` datetime DEFAULT NULL,
   PRIMARY KEY (`code_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -67,6 +67,13 @@ interface Store
     public function consumeCode(string $codeHash, int $at): bool;
 
     /**
+     * Set replayed_at if NULL: the code was presented again after it was
+     * used. The exchange that used it checks this once its refresh row is
+     * saved, so a replay that raced it is not missed.
+     */
+    public function markCodeReplayed(string $codeHash, int $at): void;
+
+    /**
      * @param array<string, mixed> $row
      * @return int the new row's id
      */
@@ -91,9 +98,6 @@ interface Store
 
     /** Delete every refresh row of one user (company, login). */
     public function deleteRefreshForAccount(int $company, string $login): void;
-
-    /** Delete one refresh row: one saved for a refresh that then lost its race. */
-    public function deleteRefresh(int $id): void;
 
     /**
      * Every graphql token a refresh row (any state) points at, once each, for

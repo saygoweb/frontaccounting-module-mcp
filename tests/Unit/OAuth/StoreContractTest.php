@@ -52,6 +52,7 @@ abstract class StoreContractTest extends TestCase
             'resource' => 'https://fa.example.com/modules/mcp/',
             'expires_at' => self::T + 60,
             'used_at' => null,
+            'replayed_at' => null,
         ], $overrides);
     }
 
@@ -221,6 +222,18 @@ abstract class StoreContractTest extends TestCase
         $this->assertFalse($this->store->consumeCode('missing', self::T));
     }
 
+    public function testMarkCodeReplayed(): void
+    {
+        $this->store->saveCode($this->codeRow('h1'));
+        $this->assertTrue($this->store->consumeCode('h1', self::T + 1));
+        $this->store->markCodeReplayed('h1', self::T + 2);
+        $this->store->markCodeReplayed('h1', self::T + 3);
+        $this->assertSame(self::T + 2, $this->store->findCode('h1')['replayed_at']);
+        $this->assertSame(self::T + 1, $this->store->findCode('h1')['used_at']);
+        $this->store->markCodeReplayed('missing', self::T);
+        $this->assertNull($this->store->findCode('missing'));
+    }
+
     public function testRefreshRoundTrip(): void
     {
         $this->assertNull($this->store->findRefreshByHash('x'));
@@ -270,15 +283,6 @@ abstract class StoreContractTest extends TestCase
         $this->assertNull($this->store->findRefreshByHash('a'));
         $this->assertNotNull($this->store->findRefreshByHash('b'));
         $this->assertNotNull($this->store->findRefreshByHash('c'));
-    }
-
-    public function testDeleteRefresh(): void
-    {
-        $id = $this->store->saveRefresh($this->refreshRow('a'));
-        $this->store->saveRefresh($this->refreshRow('b'));
-        $this->store->deleteRefresh($id);
-        $this->assertNull($this->store->findRefreshByHash('a'));
-        $this->assertNotNull($this->store->findRefreshByHash('b'));
     }
 
     public function testGraphQlTokensListsEachTokenOnce(): void

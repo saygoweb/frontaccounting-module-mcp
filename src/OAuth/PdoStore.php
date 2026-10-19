@@ -20,7 +20,7 @@ final class PdoStore implements Store
     private const CLIENT_COLUMNS = 'client_id, kind, client_name, redirect_uris, created_at, last_used_at,'
         . ' fetched_at, fetch_ok_at, source_ip';
     private const CODE_COLUMNS = 'code_hash, client_id, company, login, redirect_uri, code_challenge, scope,'
-        . ' resource, expires_at, used_at';
+        . ' resource, expires_at, used_at, replayed_at';
     private const REFRESH_COLUMNS = 'id, token_hash, family, client_id, company, login, scope, graphql_jti,'
         . ' expires_at, rotated_at, revoked_at, created_at';
 
@@ -113,11 +113,12 @@ final class PdoStore implements Store
     public function saveCode(array $row): void
     {
         $this->run(
-            "INSERT INTO {$this->code} (" . self::CODE_COLUMNS . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            "INSERT INTO {$this->code} (" . self::CODE_COLUMNS . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 (string)$row['code_hash'], (string)$row['client_id'], (int)$row['company'], (string)$row['login'],
                 (string)$row['redirect_uri'], (string)$row['code_challenge'], (string)$row['scope'],
                 (string)$row['resource'], self::toDb($row['expires_at']), self::toDb($row['used_at']),
+                self::toDb($row['replayed_at'] ?? null),
             ]
         );
     }
@@ -132,6 +133,7 @@ final class PdoStore implements Store
         $row['resource'] = $row['resource'] === '' || $row['resource'] === null ? null : (string)$row['resource'];
         $row['expires_at'] = (int)self::fromDb($row['expires_at']);
         $row['used_at'] = self::fromDb($row['used_at']);
+        $row['replayed_at'] = self::fromDb($row['replayed_at']);
         return $row;
     }
 
@@ -141,6 +143,14 @@ final class PdoStore implements Store
             "UPDATE {$this->code} SET used_at = ? WHERE code_hash = ? AND used_at IS NULL",
             [self::toDb($at), $codeHash]
         )->rowCount() === 1;
+    }
+
+    public function markCodeReplayed(string $codeHash, int $at): void
+    {
+        $this->run(
+            "UPDATE {$this->code} SET replayed_at = ? WHERE code_hash = ? AND replayed_at IS NULL",
+            [self::toDb($at), $codeHash]
+        );
     }
 
     public function saveRefresh(array $row): int
@@ -193,11 +203,6 @@ final class PdoStore implements Store
     public function deleteRefreshForAccount(int $company, string $login): void
     {
         $this->run("DELETE FROM {$this->refresh} WHERE company = ? AND login = ?", [$company, $login]);
-    }
-
-    public function deleteRefresh(int $id): void
-    {
-        $this->run("DELETE FROM {$this->refresh} WHERE id = ?", [$id]);
     }
 
     public function graphQlTokens(): array

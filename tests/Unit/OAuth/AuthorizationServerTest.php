@@ -3,6 +3,7 @@
 namespace FA\Mcp\Tests\Unit\OAuth;
 
 use FA\Mcp\Config;
+use FA\Mcp\Gateway\AuthFailure;
 use FA\Mcp\OAuth\AuthorizationServer;
 use FA\Mcp\OAuth\CimdFetcher;
 use FA\Mcp\OAuth\Client;
@@ -597,13 +598,14 @@ class AuthorizationServerTest extends TestCase
         $this->assertCount(2, $this->accounts->issued);
     }
 
-    public function testRefreshRaceLoserRevokesItsNewToken(): void
+    public function testRefreshRaceLoserRevokesTheWholeFamily(): void
     {
         $first = $this->exchange($this->code());
         $firstJti = $this->accounts->issued[0]['jti'];
 
         // A second request with the same refresh token completes while this
-        // one is minting its access token.
+        // one is minting its access token. Two holders of one refresh token
+        // is reuse, whichever of them wins: the whole grant goes.
         $winner = null;
         $this->accounts->beforeIssue = function () use ($first, &$winner) {
             $winner = $this->refresh($first['refresh_token']);
@@ -616,13 +618,101 @@ class AuthorizationServerTest extends TestCase
         $winnerJti = $this->accounts->issued[1]['jti'];
         $loserJti = $this->accounts->issued[2]['jti'];
         $this->assertSame($this->accounts->issued[1]['token'], $winner['access_token']);
-        $this->assertSame([$firstJti, $loserJti], $this->accounts->revokedIds());
-        // The loser's own refresh row, saved before it lost, is gone again.
-        $this->assertNotContains($loserJti, array_column($this->store->graphQlTokens(), 'graphql_jti'));
+        $this->assertSame([], $this->accounts->liveJtis());
+        foreach ([$firstJti, $winnerJti, $loserJti] as $jti) {
+            $this->assertContains($jti, $this->accounts->revokedIds());
+        }
 
-        // The winner's refresh token still works.
-        $this->refresh($winner['refresh_token']);
-        $this->assertContains($winnerJti, $this->accounts->revokedIds());
+        // The winner's refresh token is dead too.
+        $this->expectOAuthError(function () use ($winner) {
+            $this->refresh($winner['refresh_token']);
+        }, 'invalid_grant');
+        $this->assertCount(3, $this->accounts->issued);
+    }
+
+    public function testRevocationCheckFailureIsInvalidGrant(): void
+    {
+        $first = $this->exchange($this->code());
+        $this->accounts->revocationCheckFailure = new AuthFailure(AuthFailure::UNAUTHENTICATED, 'no company');
+
+        $this->expectOAuthError(function () use ($first) {
+            $this->refresh($first['refresh_token']);
+        }, 'invalid_grant');
+        $this->assertCount(1, $this->accounts->issued);
+    }
+
+    public function testReuseRevokesWhatItCanWhenOneRevocationFails(): void
+    {
+        $first = $this->exchange($this->code());
+        $firstJti = $this->accounts->issued[0]['jti'];
+        $second = $this->refresh($first['refresh_token']);
+        $third = $this->refresh($second['refresh_token']);
+        $secondJti = $this->accounts->issued[1]['jti'];
+        $thirdJti = $this->accounts->issued[2]['jti'];
+
+        // The rotated $first replayed. The family's rows come back oldest
+        // first: revoking $first's token fails, and $third's still goes.
+        $this->accounts->revokeFailures[$firstJti] = true;
+        $before = count($this->accounts->revoked);
+        $this->expectOAuthError(function () use ($first) {
+            $this->refresh($first['refresh_token']);
+        }, 'invalid_grant');
+        $this->assertSame(
+            [$secondJti, $thirdJti],
+            array_column(array_slice($this->accounts->revoked, $before), 'jti')
+        );
+        $this->assertSame([], $this->accounts->liveJtis());
+        $this->assertNotNull($this->refreshRow($third['refresh_token'])['revoked_at']);
+    }
+
+    public function testCodeReplayRevocationFailureIsStillInvalidGrant(): void
+    {
+        $code = $this->code();
+        $this->exchange($code);
+        $this->accounts->revokeFailures[$this->accounts->issued[0]['jti']] = true;
+
+        $this->expectOAuthError(function () use ($code) {
+            $this->exchange($code);
+        }, 'invalid_grant');
+    }
+
+    public function testFailureToRevokeTheRotatedTokenStillReturnsTheNewPair(): void
+    {
+        $first = $this->exchange($this->code());
+        $firstJti = $this->accounts->issued[0]['jti'];
+        $this->accounts->revokeFailures[$firstJti] = true;
+
+        $second = $this->refresh($first['refresh_token']);
+        $this->assertSame($this->accounts->issued[1]['token'], $second['access_token']);
+        $this->assertNotNull($this->refreshRow($first['refresh_token'])['rotated_at']);
+
+        // The new refresh token is the live one.
+        unset($this->accounts->revokeFailures[$firstJti]);
+        $this->refresh($second['refresh_token']);
+        $this->assertCount(3, $this->accounts->issued);
+    }
+
+    public function testCodeReplayDuringTheFirstExchangeRevokesWhatTheFirstIssues(): void
+    {
+        $code = $this->code();
+
+        // The replay arrives while the first exchange is minting its access
+        // token, before its refresh row exists: there is nothing yet for the
+        // replay to revoke, so the first exchange must notice and undo itself.
+        $this->accounts->beforeIssue = function () use ($code) {
+            $this->expectOAuthError(function () use ($code) {
+                $this->exchange($code);
+            }, 'invalid_grant');
+        };
+        $this->expectOAuthError(function () use ($code) {
+            $this->exchange($code);
+        }, 'invalid_grant');
+
+        $this->assertCount(1, $this->accounts->issued);
+        $this->assertSame([], $this->accounts->liveJtis());
+        foreach ($this->store->graphQlTokens() as $token) {
+            $this->assertContains($token['graphql_jti'], $this->accounts->revokedIds());
+        }
     }
 
     public function testRefreshSaveFailureLeavesTheOldRefreshTokenUsable(): void

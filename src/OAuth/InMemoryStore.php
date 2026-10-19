@@ -98,7 +98,7 @@ final class InMemoryStore implements Store
 
     public function saveCode(array $row): void
     {
-        $this->codes[(string)$row['code_hash']] = $row;
+        $this->codes[(string)$row['code_hash']] = $row + ['replayed_at' => null];
     }
 
     public function findCode(string $codeHash): ?array
@@ -113,6 +113,13 @@ final class InMemoryStore implements Store
         }
         $this->codes[$codeHash]['used_at'] = $at;
         return true;
+    }
+
+    public function markCodeReplayed(string $codeHash, int $at): void
+    {
+        if (isset($this->codes[$codeHash]) && ($this->codes[$codeHash]['replayed_at'] ?? null) === null) {
+            $this->codes[$codeHash]['replayed_at'] = $at;
+        }
     }
 
     public function saveRefresh(array $row): int
@@ -171,11 +178,6 @@ final class InMemoryStore implements Store
                 unset($this->refresh[$id]);
             }
         }
-    }
-
-    public function deleteRefresh(int $id): void
-    {
-        unset($this->refresh[$id]);
     }
 
     public function graphQlTokens(): array

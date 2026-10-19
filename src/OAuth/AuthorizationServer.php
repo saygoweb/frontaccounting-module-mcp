@@ -141,6 +141,7 @@ final class AuthorizationServer
             'resource' => $validated['resource'],
             'expires_at' => $this->clock->now() + self::CODE_TTL,
             'used_at' => null,
+            'replayed_at' => null,
         ]);
         return $code;
     }
@@ -204,6 +205,9 @@ final class AuthorizationServer
             $family = substr($codeHash, 0, 32);
             $row = $this->store->findCode($codeHash);
             if ($row !== null && !$this->store->consumeCode($codeHash, $now)) {
+                // Marked before the family is revoked: see the check after
+                // saveRefresh() below for why the order matters.
+                $this->store->markCodeReplayed($codeHash, $now);
                 $this->revokeFamily($family, $now);
                 throw new OAuthError('invalid_grant', 'The code has already been used');
             }
@@ -246,7 +250,18 @@ final class AuthorizationServer
         $scope = (string)$row['scope'];
 
         $issued = $this->issueAccessToken($client, $company, $login, $scope);
-        [$refresh] = $this->saveRefresh($client, $company, $login, $scope, $family, $issued, $now);
+        $refresh = $this->saveRefresh($client, $company, $login, $scope, $family, $issued, $now);
+
+        // A replay racing this exchange marks the code, then revokes the
+        // family. This exchange saved its refresh row, then reads the mark.
+        // Either the replay's revocation ran after the row was saved and
+        // caught it, or the mark was already there and this exchange undoes
+        // itself: in both orders nothing issued from a replayed code lives.
+        $after = $this->store->findCode(hash('sha256', $code));
+        if ($after === null || $after['replayed_at'] !== null) {
+            $this->revokeFamily($family, $now);
+            throw new OAuthError('invalid_grant', 'The code has already been used');
+        }
         return $this->respond($client, $scope, $issued, $refresh);
     }
 
@@ -294,24 +309,33 @@ final class AuthorizationServer
 
         // Revoked with bin/fa-token: the user has ended this connection and
         // must sign in again. The access token having merely expired is the
-        // normal case here and is not asked about.
-        if ($this->accounts->tokenIsRevoked($company, $oldJti)) {
+        // normal case here and is not asked about. When graphql cannot say
+        // (the company no longer opens), the grant is refused without
+        // revoking anything, so a transient failure does not end it for good.
+        try {
+            $revoked = $this->accounts->tokenIsRevoked($company, $oldJti);
+        } catch (AuthFailure $e) {
+            throw new OAuthError('invalid_grant', 'The connection could not be checked', 400, false, $e);
+        }
+        if ($revoked) {
             $this->revokeFamily($family, $now);
             throw new OAuthError('invalid_grant', 'The connection has been revoked');
         }
 
         $issued = $this->issueAccessToken($client, $company, $login, $scope);
-        [$refresh, $newId] = $this->saveRefresh($client, $company, $login, $scope, $family, $issued, $now);
+        $refresh = $this->saveRefresh($client, $company, $login, $scope, $family, $issued, $now);
 
-        // Another request with the same refresh token won: the row and token
-        // just made are surplus, and this request fails as a reuse would.
+        // Another request with the same refresh token won the rotation. Two
+        // holders of one refresh token is reuse whichever of them won, so the
+        // whole family goes, the winner's new token and this one's included.
         if (!$this->store->rotateRefresh((int)$row['id'], $now)) {
-            $this->store->deleteRefresh($newId);
-            $this->accounts->revokeToken($company, (string)$issued['jti']);
+            $this->revokeFamily($family, $now);
             throw new OAuthError('invalid_grant', 'The refresh token has already been used');
         }
 
-        $this->accounts->revokeToken($company, $oldJti);
+        // The new pair is stored and the old row rotated: the response must
+        // go out now. The old access token expires on its own if this fails.
+        $this->revokeQuietly($company, $oldJti);
         return $this->respond($client, $scope, $issued, $refresh);
     }
 
@@ -349,7 +373,7 @@ final class AuthorizationServer
      * the client is told to try again: server_error.
      *
      * @param array{token: string, jti: string, expiresAt: int} $issued
-     * @return array{0: string, 1: int} the refresh token and its row's id
+     * @return string the refresh token
      * @throws OAuthError
      */
     private function saveRefresh(
@@ -360,10 +384,10 @@ final class AuthorizationServer
         string $family,
         array $issued,
         int $now
-    ): array {
+    ): string {
         $refresh = self::base64Url(random_bytes(32));
         try {
-            $id = $this->store->saveRefresh([
+            $this->store->saveRefresh([
                 'token_hash' => hash('sha256', $refresh),
                 'family' => $family,
                 'client_id' => $client->clientId(),
@@ -377,10 +401,10 @@ final class AuthorizationServer
                 'created_at' => $now,
             ]);
         } catch (\Exception $e) {
-            $this->accounts->revokeToken($company, (string)$issued['jti']);
+            $this->revokeQuietly($company, (string)$issued['jti']);
             throw new OAuthError('server_error', 'The refresh token could not be saved', 500, false, $e);
         }
-        return [$refresh, $id];
+        return $refresh;
     }
 
     /**
@@ -401,10 +425,30 @@ final class AuthorizationServer
         ];
     }
 
+    /**
+     * Revoke every refresh row of the family and each graphql token they
+     * point at. A token graphql cannot revoke is logged and skipped, so the
+     * rest still go and the caller still answers invalid_grant.
+     */
     private function revokeFamily(string $family, int $now): void
     {
         foreach ($this->store->revokeFamily($family, $now) as $row) {
-            $this->accounts->revokeToken((int)$row['company'], (string)$row['graphql_jti']);
+            $this->revokeQuietly((int)$row['company'], (string)$row['graphql_jti']);
+        }
+    }
+
+    /** Revoke a graphql token; a failure is logged, not thrown. */
+    private function revokeQuietly(int $company, string $jti): void
+    {
+        try {
+            $this->accounts->revokeToken($company, $jti);
+        } catch (AuthFailure $e) {
+            error_log(sprintf(
+                'mcp: could not revoke graphql token %s in company %d: %s',
+                $jti,
+                $company,
+                $e->getMessage()
+            ));
         }
     }
 

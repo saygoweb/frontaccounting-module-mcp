@@ -56,6 +56,12 @@ final class FakeAccountGateway implements AccountGateway
     /** @var array[] each ['company' => int, 'jti' => string], tokenIsRevoked() calls in order */
     public array $revocationChecks = [];
 
+    /** @var AuthFailure|null thrown by tokenIsRevoked() when set, as the gateway does when it cannot tell */
+    public ?AuthFailure $revocationCheckFailure = null;
+
+    /** @var array<string, true> jti => true: revokeToken() throws AuthFailure for these (and records nothing) */
+    public array $revokeFailures = [];
+
     private int $nextJti = 100;
 
     public function addUser(
@@ -162,6 +168,9 @@ final class FakeAccountGateway implements AccountGateway
 
     public function revokeToken(int $company, string $jti): bool
     {
+        if (isset($this->revokeFailures[$jti])) {
+            throw new AuthFailure(AuthFailure::UNAUTHENTICATED, "Company $company cannot be opened.");
+        }
         $this->revoked[] = ['company' => $company, 'jti' => $jti];
         $wasLive = isset($this->owner[$jti]) && $this->owner[$jti]['company'] === $company
             && !isset($this->revokedJtis[$jti]);
@@ -174,6 +183,9 @@ final class FakeAccountGateway implements AccountGateway
     public function tokenIsRevoked(int $company, string $jti): bool
     {
         $this->revocationChecks[] = ['company' => $company, 'jti' => $jti];
+        if ($this->revocationCheckFailure !== null) {
+            throw $this->revocationCheckFailure;
+        }
         return !isset($this->owner[$jti]) || $this->owner[$jti]['company'] !== $company
             || isset($this->revokedJtis[$jti]);
     }
