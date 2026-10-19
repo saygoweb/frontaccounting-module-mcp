@@ -89,15 +89,30 @@ final class CimdFetcher
         if (!is_array($uris) || !$uris) {
             throw self::fail('The client metadata document has no redirect_uris.');
         }
+        // The limits DCR applies (ClientRegistry::register()): what is stored
+        // must fit its columns, whoever wrote the document.
+        if (count($uris) > ClientRegistry::MAX_REDIRECT_URIS) {
+            throw self::fail('The client metadata document has more than '
+                . ClientRegistry::MAX_REDIRECT_URIS . ' redirect URIs.');
+        }
         foreach ($uris as $uri) {
-            if (!is_string($uri) || !RedirectUriPolicy::isAcceptable($uri)) {
+            if (!is_string($uri) || strlen($uri) > ClientRegistry::MAX_REDIRECT_URI_BYTES) {
+                throw self::fail('Each redirect URI in the client metadata document must be a string of at most '
+                    . ClientRegistry::MAX_REDIRECT_URI_BYTES . ' bytes.');
+            }
+            if (!RedirectUriPolicy::isAcceptable($uri)) {
                 throw self::fail('The client metadata document has an unacceptable redirect URI.');
             }
         }
 
-        $name = isset($doc['client_name']) && is_string($doc['client_name']) && trim($doc['client_name']) !== ''
-            ? mb_substr(trim($doc['client_name']), 0, 255)
-            : $host;
+        $name = isset($doc['client_name']) && is_string($doc['client_name']) ? trim($doc['client_name']) : '';
+        if (strlen($name) > ClientRegistry::MAX_CLIENT_NAME_BYTES) {
+            throw self::fail('The client metadata document\'s client_name is longer than '
+                . ClientRegistry::MAX_CLIENT_NAME_BYTES . ' bytes.');
+        }
+        if ($name === '') {
+            $name = $host;
+        }
 
         return new Client($url, 'cimd', $name, $uris);
     }

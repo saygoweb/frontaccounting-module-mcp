@@ -19,6 +19,8 @@ final class ClientRegistry
     public const MAX_REDIRECT_URIS = 10;
     public const MAX_REDIRECT_URI_BYTES = 512;
     public const MAX_CLIENT_NAME_BYTES = 255; // mcp_oauth_client.client_name
+    /** redirect_uris as stored: unescaped, so a URI's stored size is its own. */
+    private const JSON_FLAGS = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
 
     private Store $store;
     private CimdFetcher $cimd;
@@ -125,7 +127,7 @@ final class ClientRegistry
             'client_id' => $client->clientId(),
             'kind' => 'dcr',
             'client_name' => $client->name(),
-            'redirect_uris' => (string)json_encode($client->redirectUris(), JSON_UNESCAPED_SLASHES),
+            'redirect_uris' => (string)json_encode($client->redirectUris(), self::JSON_FLAGS),
             'created_at' => $now,
             'last_used_at' => null,
             'fetched_at' => null,
@@ -301,7 +303,7 @@ final class ClientRegistry
             'client_id' => $url,
             'kind' => 'cimd',
             'client_name' => $client->name(),
-            'redirect_uris' => (string)json_encode($client->redirectUris(), JSON_UNESCAPED_SLASHES),
+            'redirect_uris' => (string)json_encode($client->redirectUris(), self::JSON_FLAGS),
             'created_at' => $row !== null ? (int)$row['created_at'] : $now,
             'last_used_at' => $row !== null && $row['last_used_at'] !== null ? (int)$row['last_used_at'] : null,
             'fetched_at' => $now,

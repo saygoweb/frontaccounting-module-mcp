@@ -209,6 +209,70 @@ class ClientRegistryTest extends TestCase
         ]));
     }
 
+    /** @return array<string, array{0: array<string, mixed>}> */
+    public function cimdOverLimits(): array
+    {
+        $uri = 'https://app.example/callback';
+        return [
+            'eleven redirect URIs' => [['redirect_uris' => array_map(function (int $i) use ($uri): string {
+                return $uri . $i;
+            }, range(1, 11))]],
+            'a 513-byte redirect URI' => [['redirect_uris' => [$uri . '/' . str_repeat('a', 512 - strlen($uri))]]],
+            'a 256-byte client_name' => [['client_name' => str_repeat('é', 128)]],
+        ];
+    }
+
+    /**
+     * @dataProvider cimdOverLimits
+     * @param array<string, mixed> $overrides
+     */
+    public function testCimdDocumentOverTheDcrLimitsIsAFailedFetch(array $overrides): void
+    {
+        $this->http->respond(self::CIMD_URL, 200, (string)json_encode(array_merge([
+            'client_id' => self::CIMD_URL,
+            'client_name' => 'Example App',
+            'redirect_uris' => ['https://app.example/callback'],
+        ], $overrides)));
+        $registry = $this->registry();
+
+        $this->expectOAuthError(function () use ($registry) {
+            $registry->resolve(self::CIMD_URL, self::IP);
+        }, 'invalid_client', 401);
+        // Remembered as a failed fetch: the backoff applies, and it counts
+        // towards the address's lookups.
+        $this->expectOAuthError(function () use ($registry) {
+            $registry->resolve(self::CIMD_URL, self::IP);
+        }, 'invalid_client', 401);
+        $this->assertCount(1, $this->http->calls);
+        $this->assertSame(1, $this->store->countClientsFromIpSince(self::IP, 0, 'cimd'));
+    }
+
+    public function testCimdDocumentAtTheDcrLimitsIsAccepted(): void
+    {
+        $uri = 'https://app.example/callback';
+        $uris = array_map(function (int $i) use ($uri): string {
+            return $uri . '/' . $i . str_repeat('a', 512 - strlen($uri) - 1 - strlen((string)$i));
+        }, range(1, 10));
+        $this->http->respond(self::CIMD_URL, 200, (string)json_encode([
+            'client_id' => self::CIMD_URL,
+            'client_name' => str_repeat('é', 127) . 'x',
+            'redirect_uris' => $uris,
+        ]));
+        $this->assertSame($uris, $this->registry()->resolve(self::CIMD_URL, self::IP)->redirectUris());
+    }
+
+    public function testCimdRedirectUrisAreStoredUnescaped(): void
+    {
+        $this->http->respond(self::CIMD_URL, 200, (string)json_encode([
+            'client_id' => self::CIMD_URL,
+            'redirect_uris' => ['https://app.example/rückruf'],
+        ]));
+        $this->registry()->resolve(self::CIMD_URL, self::IP);
+        $row = $this->store->findClient(self::CIMD_URL);
+        $this->assertNotNull($row);
+        $this->assertSame('["https://app.example/rückruf"]', $row['redirect_uris']);
+    }
+
     public function testResolveForTokenFindsDcrClient(): void
     {
         $registry = $this->registry();
