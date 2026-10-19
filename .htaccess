@@ -1,0 +1,15 @@
+# Every path under the module goes to index.php (MCP endpoint, OAuth, metadata).
+# index.php is the only file served: the code, the configuration and the
+# libraries are refused outright, and any other file (composer.json, README.md,
+# ...) reaches index.php too, which answers 404.
+#
+# Apache hands Authorization to PHP only if told to, and a rewrite can drop it:
+# SetEnvIf copies it to HTTP_AUTHORIZATION (REDIRECT_HTTP_AUTHORIZATION after the
+# rewrite), which the module reads when the header itself is missing.
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+
+RewriteEngine On
+RewriteRule ^(src|tests|vendor|sql|tools|docs|build)(/|$) - [F,L]
+RewriteRule ^(config_mcp|config_mcp\.example|container|app|hooks)\.php$ - [F,L]
+RewriteRule ^index\.php$ - [L]
+RewriteRule ^ index.php [QSA,L]

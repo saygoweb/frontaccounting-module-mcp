@@ -6,10 +6,26 @@
 
     <file>src</file>
     <file>tests</file>
-    <!-- hooks.php, index.php, app.php and container.php join this list as they
-         are created: phpcs refuses to run when a named file does not exist. -->
+    <file>hooks.php</file>
+    <file>index.php</file>
+    <file>app.php</file>
+    <file>container.php</file>
 
     <exclude-pattern>vendor/*</exclude-pattern>
+    <!-- FrontAccounting's own names, declared for phpstan only. -->
+    <exclude-pattern>tests/phpstan/*</exclude-pattern>
+
+    <!-- hooks.php is FrontAccounting-style by contract: a global, snake_case
+         hooks_<module> class with snake_case methods FrontAccounting calls. -->
+    <rule ref="PSR1.Classes.ClassDeclaration.MissingNamespace">
+        <exclude-pattern>hooks.php</exclude-pattern>
+    </rule>
+    <rule ref="Squiz.Classes.ValidClassName.NotCamelCaps">
+        <exclude-pattern>hooks.php</exclude-pattern>
+    </rule>
+    <rule ref="PSR1.Methods.CamelCapsMethodName.NotCamelCaps">
+        <exclude-pattern>hooks.php</exclude-pattern>
+    </rule>
 
     <arg value="p"/>
     <arg name="colors"/>

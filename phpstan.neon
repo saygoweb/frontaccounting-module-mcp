@@ -3,3 +3,17 @@ parameters:
 
     paths:
         - src
+        - hooks.php
+        - index.php
+        - app.php
+        - container.php
+
+    # graphql's autoloader (FA\GraphQL\Api\Executor, its Config) when graphql is
+    # beside this module, as it is in the FrontAccounting CI image.
+    bootstrapFiles:
+        - tests/bootstrap.php
+
+    # FrontAccounting's base hooks class and display_error(), for hooks.php.
+    scanFiles:
+        - tests/phpstan/fa-stubs.php
+

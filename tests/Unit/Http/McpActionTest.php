@@ -110,7 +110,10 @@ class McpActionTest extends TestCase
     {
         $response = $this->send($this->action(), self::toolsList(), ['Authorization' => null]);
         $this->assertSame(401, $response->getStatusCode());
-        $this->assertSame('Bearer resource_metadata="' . self::METADATA . '"', $response->getHeaderLine('WWW-Authenticate'));
+        $this->assertSame(
+            'Bearer resource_metadata="' . self::METADATA . '"',
+            $response->getHeaderLine('WWW-Authenticate')
+        );
         $this->assertSame('UNAUTHENTICATED', self::body($response)['error']);
         $this->assertSame([], $this->made, 'no gateway for a request without a token');
     }
@@ -183,7 +186,8 @@ class McpActionTest extends TestCase
 
     public function testHttpsWithRequireTlsIsServed(): void
     {
-        $response = $this->send($this->action(['require_tls' => true]), self::toolsList(), [], 'POST', ['HTTPS' => 'on']);
+        $action = $this->action(['require_tls' => true]);
+        $response = $this->send($action, self::toolsList(), [], 'POST', ['HTTPS' => 'on']);
         $this->assertSame(200, $response->getStatusCode());
     }
 
@@ -194,15 +198,14 @@ class McpActionTest extends TestCase
             403,
             $this->send($this->action(['require_tls' => true]), self::toolsList(), $headers)->getStatusCode()
         );
-        $this->assertSame(
-            200,
-            $this->send($this->action(['require_tls' => true], null, true), self::toolsList(), $headers)->getStatusCode()
-        );
+        $trusting = $this->action(['require_tls' => true], null, true);
+        $this->assertSame(200, $this->send($trusting, self::toolsList(), $headers)->getStatusCode());
     }
 
     public function testPlainHttpWithoutRequireTlsIsServed(): void
     {
-        $this->assertSame(200, $this->send($this->action(['require_tls' => false]), self::toolsList())->getStatusCode());
+        $action = $this->action(['require_tls' => false]);
+        $this->assertSame(200, $this->send($action, self::toolsList())->getStatusCode());
     }
 
     public function testForeignOriginIs403(): void
@@ -231,7 +234,10 @@ class McpActionTest extends TestCase
         );
         $this->assertSame(401, $response->getStatusCode());
         $this->assertSame('https://claude.ai', $response->getHeaderLine('Access-Control-Allow-Origin'));
-        $this->assertStringContainsString('WWW-Authenticate', $response->getHeaderLine('Access-Control-Expose-Headers'));
+        $this->assertStringContainsString(
+            'WWW-Authenticate',
+            $response->getHeaderLine('Access-Control-Expose-Headers')
+        );
     }
 
     public function testBaseUrlOriginIsServed(): void
@@ -255,11 +261,12 @@ class McpActionTest extends TestCase
             'method' => 'tools/list',
             'params' => ['_meta' => ['io.modelcontextprotocol/protocolVersion' => '2026-07-28']],
         ];
-        $ok = $this->send($this->action(), $message, ['MCP-Protocol-Version' => '2026-07-28', 'Mcp-Method' => 'tools/list']);
+        $headers = ['MCP-Protocol-Version' => '2026-07-28', 'Mcp-Method' => 'tools/list'];
+        $ok = $this->send($this->action(), $message, $headers);
         $this->assertSame(200, $ok->getStatusCode());
         $this->assertSame('complete', self::body($ok)['result']['resultType']);
 
-        $mismatch = $this->send($this->action(), $message, ['MCP-Protocol-Version' => '2026-07-28', 'Mcp-Method' => 'ping']);
+        $mismatch = $this->send($this->action(), $message, ['Mcp-Method' => 'ping'] + $headers);
         $this->assertSame(400, $mismatch->getStatusCode());
     }
 
@@ -278,7 +285,8 @@ class McpActionTest extends TestCase
 
     public function testPreflightFromAllowedOrigin(): void
     {
-        $response = $this->send($this->action(), null, ['Origin' => 'https://claude.ai', 'Authorization' => null], 'OPTIONS');
+        $headers = ['Origin' => 'https://claude.ai', 'Authorization' => null];
+        $response = $this->send($this->action(), null, $headers, 'OPTIONS');
         $this->assertSame(204, $response->getStatusCode());
         $this->assertSame('https://claude.ai', $response->getHeaderLine('Access-Control-Allow-Origin'));
         $this->assertStringContainsString('POST', $response->getHeaderLine('Access-Control-Allow-Methods'));
@@ -288,7 +296,8 @@ class McpActionTest extends TestCase
 
     public function testPreflightFromForeignOriginGetsNoCors(): void
     {
-        $response = $this->send($this->action(), null, ['Origin' => 'https://evil.example', 'Authorization' => null], 'OPTIONS');
+        $headers = ['Origin' => 'https://evil.example', 'Authorization' => null];
+        $response = $this->send($this->action(), null, $headers, 'OPTIONS');
         $this->assertSame('', $response->getHeaderLine('Access-Control-Allow-Origin'));
     }
 

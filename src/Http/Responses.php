@@ -26,8 +26,12 @@ final class Responses
     }
 
     /** @param array<string, string> $headers */
-    public static function text(ResponseInterface $res, int $status, string $text, array $headers = []): ResponseInterface
-    {
+    public static function text(
+        ResponseInterface $res,
+        int $status,
+        string $text,
+        array $headers = []
+    ): ResponseInterface {
         $res = self::withHeaders($res->withStatus($status), $headers)
             ->withHeader('Content-Type', 'text/plain; charset=utf-8');
         $res->getBody()->write($text);
@@ -35,8 +39,12 @@ final class Responses
     }
 
     /** @param array<string, string> $headers */
-    public static function html(ResponseInterface $res, int $status, string $html, array $headers = []): ResponseInterface
-    {
+    public static function html(
+        ResponseInterface $res,
+        int $status,
+        string $html,
+        array $headers = []
+    ): ResponseInterface {
         $res = self::withHeaders($res->withStatus($status), $headers)
             ->withHeader('Content-Type', 'text/html; charset=utf-8');
         $res->getBody()->write($html);
