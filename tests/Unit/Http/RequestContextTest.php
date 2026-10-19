@@ -45,13 +45,51 @@ class RequestContextTest extends TestCase
 
     public function testForwardedHeadersBelievedWithTrustProxy(): void
     {
-        // As graphql's RequestInfo: the first X-Forwarded-For hop is the client.
         $ctx = RequestContext::fromRequest($this->request(
             ['REMOTE_ADDR' => '10.0.0.5'],
-            ['X-Forwarded-Proto' => 'HTTPS', 'X-Forwarded-For' => '203.0.113.9, 10.0.0.7']
+            ['X-Forwarded-Proto' => 'HTTPS', 'X-Forwarded-For' => '203.0.113.9']
         ), true);
         $this->assertTrue($ctx->isHttps());
         $this->assertSame('203.0.113.9', $ctx->clientIp());
+    }
+
+    /** @return array<string, array{0: string, 1: string}> */
+    public function forwardedFor(): array
+    {
+        return [
+            'a spoofed entry ahead of the proxy\'s' => ['198.51.100.66, 203.0.113.9', '203.0.113.9'],
+            'several, with spaces' => [' 1.1.1.1 ,2.2.2.2 , 203.0.113.9 ', '203.0.113.9'],
+        ];
+    }
+
+    /**
+     * The trusted proxy appends the address it saw: the rightmost entry. What
+     * is to its left came from the client and proves nothing.
+     *
+     * @dataProvider forwardedFor
+     */
+    public function testTheRightmostForwardedForEntryIsTheClient(string $header, string $expected): void
+    {
+        $ctx = RequestContext::fromRequest($this->request(['REMOTE_ADDR' => '10.0.0.5'], [
+            'X-Forwarded-For' => $header,
+        ]), true);
+        $this->assertSame($expected, $ctx->clientIp());
+    }
+
+    public function testRightmostAcrossHeaderLines(): void
+    {
+        $r = $this->request(['REMOTE_ADDR' => '10.0.0.5'])
+            ->withHeader('X-Forwarded-For', '198.51.100.66')
+            ->withAddedHeader('X-Forwarded-For', '203.0.113.9');
+        $this->assertSame('203.0.113.9', RequestContext::fromRequest($r, true)->clientIp());
+    }
+
+    public function testAnEmptyLastEntryFallsBackToTheRemoteAddress(): void
+    {
+        $ctx = RequestContext::fromRequest($this->request(['REMOTE_ADDR' => '10.0.0.5'], [
+            'X-Forwarded-For' => '203.0.113.9, ',
+        ]), true);
+        $this->assertSame('10.0.0.5', $ctx->clientIp());
     }
 
     public function testOrigin(): void

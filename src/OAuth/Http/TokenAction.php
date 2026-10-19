@@ -20,9 +20,9 @@ final class TokenAction extends JsonEndpoint
 
     private AuthorizationServer $server;
 
-    public function __construct(Config $config, AuthorizationServer $server, bool $trustProxy = false)
+    public function __construct(Config $config, AuthorizationServer $server, ?RequestContext $context = null)
     {
-        parent::__construct($config, $trustProxy);
+        parent::__construct($config, $context);
         $this->server = $server;
     }
 

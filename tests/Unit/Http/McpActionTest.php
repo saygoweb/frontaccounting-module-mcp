@@ -6,11 +6,13 @@ use FA\Mcp\Config;
 use FA\Mcp\Gateway\AuthFailure;
 use FA\Mcp\Gateway\GraphQlGateway;
 use FA\Mcp\Http\McpAction;
+use FA\Mcp\Http\RequestContext;
 use FA\Mcp\Protocol\McpServer;
 use FA\Mcp\Tests\Support\FakeGraphQlGateway;
 use FA\Mcp\Tool\SchemaToolFactory;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Factory\StreamFactory;
 use Slim\Psr7\Response;
@@ -30,8 +32,11 @@ class McpActionTest extends TestCase
             ->on('customerList', ['data' => ['customerList' => [['id' => '1', 'name' => 'Acme']]]]);
     }
 
-    private function action(array $config = [], ?GraphQlGateway $gql = null, bool $trustProxy = false): McpAction
-    {
+    private function action(
+        array $config = [],
+        ?GraphQlGateway $gql = null,
+        ?RequestContext $context = null
+    ): McpAction {
         $gql = $gql ?? $this->gateway();
         $config = Config::fromArray($config + ['base_url' => self::BASE, 'require_tls' => false]);
         return new McpAction(
@@ -42,7 +47,7 @@ class McpActionTest extends TestCase
                 $this->made[] = [$bearer, $ip];
                 return $gql;
             },
-            $trustProxy
+            $context
         );
     }
 
@@ -57,6 +62,19 @@ class McpActionTest extends TestCase
         string $method = 'POST',
         array $server = []
     ): ResponseInterface {
+        return $action($this->request($message, $headers, $method, $server), new Response());
+    }
+
+    /**
+     * @param array<string, string|null> $headers
+     * @param array<string, string> $server
+     */
+    private function request(
+        ?array $message,
+        array $headers = [],
+        string $method = 'POST',
+        array $server = []
+    ): ServerRequestInterface {
         $request = (new ServerRequestFactory())->createServerRequest(
             $method,
             '/modules/mcp/',
@@ -74,6 +92,14 @@ class McpActionTest extends TestCase
         if ($message !== null) {
             $request = $request->withBody((new StreamFactory())->createStream((string) json_encode($message)));
         }
+        return $request;
+    }
+
+    /** The action as the container builds it: with the request's context, trust_proxy as given. */
+    private function sendTrusting(bool $trustProxy, array $config, array $headers): ResponseInterface
+    {
+        $request = $this->request(self::toolsList(), $headers);
+        $action = $this->action($config, null, RequestContext::fromRequest($request, $trustProxy));
         return $action($request, new Response());
     }
 
@@ -101,8 +127,8 @@ class McpActionTest extends TestCase
     public function testClientIpFollowsTrustProxy(): void
     {
         $headers = ['X-Forwarded-For' => '203.0.113.9'];
-        $this->send($this->action([], null, true), self::toolsList(), $headers);
-        $this->send($this->action([], null, false), self::toolsList(), $headers);
+        $this->sendTrusting(true, [], $headers);
+        $this->sendTrusting(false, [], $headers);
         $this->assertSame([['good-token', '203.0.113.9'], ['good-token', '198.51.100.7']], $this->made);
     }
 
@@ -198,8 +224,8 @@ class McpActionTest extends TestCase
             403,
             $this->send($this->action(['require_tls' => true]), self::toolsList(), $headers)->getStatusCode()
         );
-        $trusting = $this->action(['require_tls' => true], null, true);
-        $this->assertSame(200, $this->send($trusting, self::toolsList(), $headers)->getStatusCode());
+        $this->assertSame(403, $this->sendTrusting(false, ['require_tls' => true], $headers)->getStatusCode());
+        $this->assertSame(200, $this->sendTrusting(true, ['require_tls' => true], $headers)->getStatusCode());
     }
 
     public function testPlainHttpWithoutRequireTlsIsServed(): void

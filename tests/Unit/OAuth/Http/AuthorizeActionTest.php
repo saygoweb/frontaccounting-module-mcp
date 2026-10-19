@@ -3,6 +3,7 @@
 namespace FA\Mcp\Tests\Unit\OAuth\Http;
 
 use FA\Mcp\Config;
+use FA\Mcp\Http\RequestContext;
 use FA\Mcp\OAuth\AuthorizationServer;
 use FA\Mcp\OAuth\CimdFetcher;
 use FA\Mcp\OAuth\Client;
@@ -68,7 +69,7 @@ class AuthorizeActionTest extends TestCase
         );
     }
 
-    private function action(?Config $config = null): AuthorizeAction
+    private function action(?Config $config = null, ?RequestContext $context = null): AuthorizeAction
     {
         return new AuthorizeAction(
             $config ?? $this->config,
@@ -76,7 +77,8 @@ class AuthorizeActionTest extends TestCase
             $this->accounts,
             new Pages(),
             McpSession::key(self::SECRET),
-            $this->clock
+            $this->clock,
+            $context
         );
     }
 
@@ -523,7 +525,31 @@ class AuthorizeActionTest extends TestCase
         $request = Requests::get(self::PATH, $this->query(), ['HTTPS' => '']);
         $res = $this->action($config)($request, Requests::response());
         $this->assertSame(200, $res->getStatusCode());
+        // The cookie follows base_url: an https base_url makes it Secure even
+        // when this hop was plain HTTP (TLS ended at a proxy not trusted).
+        $this->assertStringContainsString('; Secure', $res->getHeaderLine('Set-Cookie'));
+    }
+
+    public function testTheCookieIsNotSecureForAPlainHttpBaseUrl(): void
+    {
+        $config = Config::fromArray(['base_url' => 'http://fa.local/modules/mcp', 'require_tls' => false]);
+        $request = Requests::get(self::PATH, $this->query(), ['HTTPS' => '']);
+        $res = $this->action($config)($request, Requests::response());
+        $this->assertSame(200, $res->getStatusCode());
+        $this->assertNotSame('', $res->getHeaderLine('Set-Cookie'));
         $this->assertStringNotContainsString('Secure', $res->getHeaderLine('Set-Cookie'));
+    }
+
+    public function testTheInjectedRequestContextDecidesHttps(): void
+    {
+        // The container's context (trust_proxy on, X-Forwarded-Proto https)
+        // is the one used; the action does not rebuild it from the request.
+        $request = Requests::get(self::PATH, $this->query(), ['HTTPS' => ''])
+            ->withHeader('X-Forwarded-Proto', 'https');
+        $res = $this->action(null, RequestContext::fromRequest($request, true))($request, Requests::response());
+        $this->assertSame(200, $res->getStatusCode());
+        $res = $this->action(null, RequestContext::fromRequest($request, false))($request, Requests::response());
+        $this->assertSame(400, $res->getStatusCode());
     }
 
     public function testAnUnexpectedFailureIsAGeneric500Page(): void

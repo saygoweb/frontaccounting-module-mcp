@@ -3,9 +3,11 @@
 /*
     The request's object graph. Returns a factory rather than a container because
     three things come from index.php: this module's configuration, the GraphQL
-    module's (for trust_proxy, and to build the Executor) and what is known about
-    the HTTP request. The same container is given to Slim (app.php), so actions
-    and middleware resolve through it.
+    module's (to build the Executor) and what is known about the HTTP request
+    (RequestContext, built once with graphql's trust_proxy and handed to every
+    action, so none of them reads forwarded headers on its own). The same
+    container is given to Slim (app.php), so actions and middleware resolve
+    through it.
 */
 
 use DI\ContainerBuilder;
@@ -102,12 +104,13 @@ return function (Config $config, GraphQlConfig $graphqlConfig, RequestContext $r
                 $config
             );
         },
-        MetadataAction::class => static function (ContainerInterface $c) use ($config, $graphqlConfig): MetadataAction {
-            return new MetadataAction($config, $c->get(Metadata::class), $graphqlConfig->trustProxy);
+        MetadataAction::class => static function (ContainerInterface $c) use ($config, $request): MetadataAction {
+            return new MetadataAction($config, $c->get(Metadata::class), $request);
         },
         AuthorizeAction::class => static function (ContainerInterface $c) use (
             $config,
-            $graphqlConfig
+            $graphqlConfig,
+            $request
         ): AuthorizeAction {
             return new AuthorizeAction(
                 $config,
@@ -116,27 +119,22 @@ return function (Config $config, GraphQlConfig $graphqlConfig, RequestContext $r
                 new Pages(),
                 McpSession::key($graphqlConfig->secret),
                 $c->get(Clock::class),
-                $graphqlConfig->trustProxy
+                $request
             );
         },
-        TokenAction::class => static function (ContainerInterface $c) use ($config, $graphqlConfig): TokenAction {
-            return new TokenAction($config, $c->get(AuthorizationServer::class), $graphqlConfig->trustProxy);
+        TokenAction::class => static function (ContainerInterface $c) use ($config, $request): TokenAction {
+            return new TokenAction($config, $c->get(AuthorizationServer::class), $request);
         },
-        RegisterAction::class => static function (ContainerInterface $c) use ($config, $graphqlConfig): RegisterAction {
-            return new RegisterAction(
-                $config,
-                $c->get(ClientRegistry::class),
-                $c->get(Clock::class),
-                $graphqlConfig->trustProxy
-            );
+        RegisterAction::class => static function (ContainerInterface $c) use ($config, $request): RegisterAction {
+            return new RegisterAction($config, $c->get(ClientRegistry::class), $c->get(Clock::class), $request);
         },
-        McpAction::class => static function (ContainerInterface $c) use ($config, $graphqlConfig): McpAction {
+        McpAction::class => static function (ContainerInterface $c) use ($config, $request): McpAction {
             return new McpAction(
                 $config,
                 $c->get(ProtocolServer::class),
                 $c->get(SchemaToolFactory::class),
                 $c->get('mcp.gatewayFactory'),
-                $graphqlConfig->trustProxy
+                $request
             );
         },
         ErrorMiddleware::class => static function () use ($config): ErrorMiddleware {

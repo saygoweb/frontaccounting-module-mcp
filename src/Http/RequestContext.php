@@ -8,9 +8,13 @@ use Psr\Http\Message\ServerRequestInterface;
  * What the request says about itself (spec §5.5): HTTPS or not, the end
  * client's address, its Origin, and the headers the protocol layer reads.
  *
- * Forwarded headers are believed only with graphql's trust_proxy, exactly as
- * graphql's own RequestInfo believes them: X-Forwarded-Proto https makes the
- * request HTTPS, and the first X-Forwarded-For hop is the client.
+ * Forwarded headers are believed only with graphql's trust_proxy:
+ * X-Forwarded-Proto https makes the request HTTPS, and the rightmost
+ * X-Forwarded-For entry is the client. That entry is the one the trusted
+ * proxy appended; anything to its left came from the client itself, so a
+ * spoofed address cannot dodge the per-address limits (OAuth registration,
+ * CIMD lookups, FrontAccounting's login throttling). An empty rightmost entry
+ * leaves REMOTE_ADDR.
  *
  * Headers are read through PSR-7 first. A request built from a server
  * environment that dropped some of them falls back to the CGI variables:
@@ -49,7 +53,11 @@ final class RequestContext
             }
             $forwarded = $r->getHeaderLine('X-Forwarded-For');
             if (trim($forwarded) !== '') {
-                $clientIp = trim(explode(',', $forwarded)[0]);
+                $entries = explode(',', $forwarded);
+                $last = trim((string) end($entries));
+                if ($last !== '') {
+                    $clientIp = $last;
+                }
             }
         }
 

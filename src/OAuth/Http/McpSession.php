@@ -17,7 +17,8 @@ use Psr\Http\Message\ServerRequestInterface;
  * ignored whole, so it signs no one in and carries no CSRF token.
  *
  * It never creates a FrontAccounting login session. The cookie is scoped to
- * the module's /oauth/ path, HttpOnly, SameSite=Lax, and Secure on HTTPS.
+ * the module's /oauth/ path, HttpOnly, SameSite=Lax, and Secure when the
+ * module is served over https.
  */
 final class McpSession
 {
@@ -58,7 +59,7 @@ final class McpSession
     /**
      * @param string $key self::key()
      * @param string $path self::cookiePath()
-     * @param bool $secure whether the request came over HTTPS
+     * @param bool $secure whether the cookie is Secure: the module is served over https
      */
     public static function fromRequest(
         ServerRequestInterface $request,

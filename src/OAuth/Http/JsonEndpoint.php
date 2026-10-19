@@ -24,14 +24,18 @@ use Psr\Http\Message\ServerRequestInterface;
 abstract class JsonEndpoint
 {
     protected Config $config;
-    private bool $trustProxy;
+    private ?RequestContext $context;
     private OriginGuard $origins;
 
-    /** @param bool $trustProxy graphql's trust_proxy: believe X-Forwarded-Proto and -For */
-    public function __construct(Config $config, bool $trustProxy = false)
+    /**
+     * @param RequestContext|null $context the request's context, as the container
+     *                                     builds it (graphql's trust_proxy applied);
+     *                                     null reads the request itself, trusting no proxy
+     */
+    public function __construct(Config $config, ?RequestContext $context = null)
     {
         $this->config = $config;
-        $this->trustProxy = $trustProxy;
+        $this->context = $context;
         $this->origins = new OriginGuard($config);
     }
 
@@ -47,7 +51,7 @@ abstract class JsonEndpoint
         callable $handle
     ): ResponseInterface {
         try {
-            $ctx = RequestContext::fromRequest($request, $this->trustProxy);
+            $ctx = $this->context ?? RequestContext::fromRequest($request, false);
             $cors = $this->corsHeaders($ctx->origin());
             if (strtoupper($request->getMethod()) === 'OPTIONS') {
                 return Responses::empty($response, 204, $cors === [] ? ['Allow' => $this->allowedMethods()] : $cors + [

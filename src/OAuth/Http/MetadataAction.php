@@ -18,9 +18,9 @@ final class MetadataAction extends JsonEndpoint
 {
     private Metadata $metadata;
 
-    public function __construct(Config $config, Metadata $metadata, bool $trustProxy = false)
+    public function __construct(Config $config, Metadata $metadata, ?RequestContext $context = null)
     {
-        parent::__construct($config, $trustProxy);
+        parent::__construct($config, $context);
         $this->metadata = $metadata;
     }
 

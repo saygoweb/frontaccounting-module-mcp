@@ -47,11 +47,13 @@ final class AuthorizeAction
     private Pages $pages;
     private string $sessionKey;
     private Clock $clock;
-    private bool $trustProxy;
+    private ?RequestContext $context;
 
     /**
      * @param string $sessionKey McpSession::key() of graphql's secret
-     * @param bool $trustProxy graphql's trust_proxy: believe X-Forwarded-Proto and -For
+     * @param RequestContext|null $context the request's context, as the container
+     *                                     builds it (graphql's trust_proxy applied);
+     *                                     null reads the request itself, trusting no proxy
      */
     public function __construct(
         Config $config,
@@ -60,7 +62,7 @@ final class AuthorizeAction
         Pages $pages,
         string $sessionKey,
         Clock $clock,
-        bool $trustProxy = false
+        ?RequestContext $context = null
     ) {
         $this->config = $config;
         $this->server = $server;
@@ -68,21 +70,24 @@ final class AuthorizeAction
         $this->pages = $pages;
         $this->sessionKey = $sessionKey;
         $this->clock = $clock;
-        $this->trustProxy = $trustProxy;
+        $this->context = $context;
     }
 
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
     {
         try {
-            $ctx = RequestContext::fromRequest($request, $this->trustProxy);
+            $ctx = $this->context ?? RequestContext::fromRequest($request, false);
             if ($this->config->requireTls && !$ctx->isHttps()) {
                 return $this->errorPage($response, 400, 'HTTPS is required', 'Connect over https:// instead.', null);
             }
+            // Secure whenever the module is served over https (base_url), not
+            // only when this hop was: TLS may end at a proxy not trusted.
+            $secure = $ctx->isHttps() || stripos($this->config->baseUrl, 'https://') === 0;
             $session = McpSession::fromRequest(
                 $request,
                 $this->sessionKey,
                 McpSession::cookiePath($this->config->baseUrl),
-                $ctx->isHttps(),
+                $secure,
                 $this->clock
             );
             return $session->withCookie($this->handle($request, $response, $ctx, $session));

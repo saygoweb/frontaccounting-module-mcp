@@ -5,6 +5,7 @@ namespace FA\Mcp\Http;
 use FA\Mcp\Config;
 use FA\Mcp\Gateway\AuthFailure;
 use FA\Mcp\Gateway\GraphQlGateway;
+use FA\Mcp\Protocol\HttpOutcome;
 use FA\Mcp\Protocol\HttpStatusException;
 use FA\Mcp\Protocol\ProtocolServer;
 use FA\Mcp\Tool\SchemaToolFactory;
@@ -38,25 +39,27 @@ final class McpAction
     private SchemaToolFactory $factory;
     /** @var callable(string, string): GraphQlGateway */
     private $gatewayFactory;
-    private bool $trustProxy;
+    private ?RequestContext $context;
     private OriginGuard $origins;
 
     /**
      * @param callable $gatewayFactory (string $bearer, string $clientIp): GraphQlGateway
-     * @param bool $trustProxy graphql's trust_proxy: believe X-Forwarded-Proto and -For
+     * @param RequestContext|null $context the request's context, as the container
+     *                                     builds it (graphql's trust_proxy applied);
+     *                                     null reads the request itself, trusting no proxy
      */
     public function __construct(
         Config $config,
         ProtocolServer $protocol,
         SchemaToolFactory $factory,
         callable $gatewayFactory,
-        bool $trustProxy = false
+        ?RequestContext $context = null
     ) {
         $this->config = $config;
         $this->protocol = $protocol;
         $this->factory = $factory;
         $this->gatewayFactory = $gatewayFactory;
-        $this->trustProxy = $trustProxy;
+        $this->context = $context;
         $this->origins = new OriginGuard($config);
     }
 
@@ -96,7 +99,7 @@ final class McpAction
 
     private function handle(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
     {
-        $ctx = RequestContext::fromRequest($request, $this->trustProxy);
+        $ctx = $this->context ?? RequestContext::fromRequest($request, false);
 
         if ($this->config->requireTls && !$ctx->isHttps()) {
             return Responses::json($response, 403, ['error' => 'TLS_REQUIRED', 'message' => 'HTTPS is required.']);
@@ -149,21 +152,12 @@ final class McpAction
         $tools = new ToolCatalog($gql, $this->factory, $this->config->escapeHatch, self::authFailure($this->config));
 
         // FrontAccounting, booted by the first Executor call, may print notices
-        // or HTML; none of it belongs in the JSON body.
-        $level = ob_get_level();
-        ob_start();
-        try {
-            $outcome = $this->protocol->handle((string) $request->getBody(), $ctx->mcpHeaders(), $tools);
-        } finally {
-            $printed = '';
-            while (ob_get_level() > $level) {
-                $printed = (string) ob_get_clean() . $printed;
-            }
-            if ($printed !== '') {
-                error_log('mcp: discarded ' . strlen($printed) . ' bytes of output: '
-                    . substr($printed, 0, OutputCapture::LOGGED_BYTES));
-            }
-        }
+        // or HTML; none of it belongs in the JSON body. index.php's capture
+        // would drop it too; this one logs it against the message that caused
+        // it, and keeps the action safe to call on its own.
+        $outcome = OutputCapture::around(function () use ($request, $ctx, $tools): HttpOutcome {
+            return $this->protocol->handle((string) $request->getBody(), $ctx->mcpHeaders(), $tools);
+        });
 
         $headers = $outcome->headers() + $cors;
         return $outcome->body() === null

@@ -21,9 +21,13 @@ final class RegisterAction extends JsonEndpoint
     private ClientRegistry $clients;
     private Clock $clock;
 
-    public function __construct(Config $config, ClientRegistry $clients, Clock $clock, bool $trustProxy = false)
-    {
-        parent::__construct($config, $trustProxy);
+    public function __construct(
+        Config $config,
+        ClientRegistry $clients,
+        Clock $clock,
+        ?RequestContext $context = null
+    ) {
+        parent::__construct($config, $context);
         $this->clients = $clients;
         $this->clock = $clock;
     }

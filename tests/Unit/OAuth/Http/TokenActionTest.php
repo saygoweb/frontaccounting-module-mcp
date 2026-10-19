@@ -3,6 +3,7 @@
 namespace FA\Mcp\Tests\Unit\OAuth\Http;
 
 use FA\Mcp\Config;
+use FA\Mcp\Http\RequestContext;
 use FA\Mcp\OAuth\AuthorizationServer;
 use FA\Mcp\OAuth\CimdFetcher;
 use FA\Mcp\OAuth\Client;
@@ -59,9 +60,9 @@ class TokenActionTest extends TestCase
         );
     }
 
-    private function action(?Config $config = null): TokenAction
+    private function action(?Config $config = null, ?RequestContext $context = null): TokenAction
     {
-        return new TokenAction($config ?? $this->config, $this->server);
+        return new TokenAction($config ?? $this->config, $this->server, $context);
     }
 
     private function code(): string
@@ -183,6 +184,18 @@ class TokenActionTest extends TestCase
             ['error' => 'invalid_request', 'error_description' => 'HTTPS is required'],
             Requests::body($res)
         );
+    }
+
+    public function testTheInjectedRequestContextDecidesHttps(): void
+    {
+        // The container's context (trust_proxy on, X-Forwarded-Proto https)
+        // is the one used; the endpoint does not rebuild it from the request.
+        $request = Requests::form('/modules/mcp/oauth/token', ['grant_type' => 'x'], [], ['HTTPS' => ''])
+            ->withHeader('X-Forwarded-Proto', 'https');
+        $res = $this->action(null, RequestContext::fromRequest($request, true))($request, Requests::response());
+        $this->assertSame('unsupported_grant_type', Requests::body($res)['error']);
+        $res = $this->action(null, RequestContext::fromRequest($request, false))($request, Requests::response());
+        $this->assertSame('HTTPS is required', Requests::body($res)['error_description']);
     }
 
     public function testAnAllowedOriginGetsCors(): void

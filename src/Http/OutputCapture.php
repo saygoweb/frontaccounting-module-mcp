@@ -12,6 +12,9 @@ namespace FA\Mcp\Http;
  * fatal error, all of which FrontAccounting code can reach — the shutdown function
  * drops the output instead and answers the fixed JSON-RPC 500 (-32603): nothing
  * has been sent, so it still can.
+ *
+ * around() is the same capture for one call inside a request: McpAction runs
+ * the protocol in it.
  */
 final class OutputCapture
 {
@@ -56,6 +59,29 @@ final class OutputCapture
         }
 
         return $captured;
+    }
+
+    /**
+     * Runs $fn with its output captured: whatever it prints, including into
+     * buffers it opens and leaves open, is logged and dropped, also when it
+     * throws. Returns what $fn returns.
+     *
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    public static function around(callable $fn)
+    {
+        $level = ob_get_level();
+        ob_start();
+        try {
+            return $fn();
+        } finally {
+            $captured = self::drain($level);
+            if ($captured !== '') {
+                error_log('mcp: discarded ' . self::describe($captured));
+            }
+        }
     }
 
     /**
