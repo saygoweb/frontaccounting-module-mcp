@@ -90,7 +90,8 @@ app.php, container.php
 .htaccess            mod_rewrite: everything not a real file → index.php; deny src/, tests/, vendor/, sql/, tools/
 config_mcp.example.php
 sql/update_1.0.sql   OAuth tables (§9)
-src/Http/            McpAction, Middleware (HeaderNormaliser, Tls, Origin, Cors, Bearer), JsonErrorMiddleware
+src/Http/            McpAction (the §5.5 checks, in order), RequestContext (headers, HTTPS, client IP),
+                     OriginGuard, BearerChallenge, Responses, OutputCapture, ErrorMiddleware, RootRewrite
 src/Protocol/        ProtocolServer, McpServer, Versions, RpcError, HttpOutcome (ported)
 src/Tool/            Tool, ToolResult, ToolCatalog, SchemaToolFactory, SelectionBuilder,
                      JsonSchemaMapper, InputValidator, ScopeProbe,
@@ -285,7 +286,7 @@ is the intended credential. No OAuth, no refresh.
    applies. `NO_API_ACCESS` shows a 403 page "Your FrontAccounting role does not
    have GraphQL API access". The sign-in is kept in the module's own PHP session
    (cookie `fa_mcp_oauth`, path = `base_url`'s path + `/oauth/`, `HttpOnly`,
-   `Secure`, `SameSite=Lax`) for at most 10 minutes; it never creates an FA
+   `Secure` whenever `base_url` is https or the request is, `SameSite=Lax`) for at most 10 minutes; it never creates an FA
    login session.
 7. **Consent page:** "*<client name>* wants to use FrontAccounting as *<user>*
    in *<company name>*". Choice: **Read-only** (`read`) or **Read and change**
@@ -312,12 +313,22 @@ is the intended credential. No OAuth, no refresh.
   1. issue a new graphql token (a failure changes nothing; the client may retry);
   2. insert the new refresh row in the same `family` (on failure revoke the new
      token, answer `server_error`);
-  3. atomically mark the old row rotated (losing a race: delete the new row,
-     revoke the new token, `invalid_grant`);
-  4. revoke the old graphql token;
+  3. atomically mark the old row rotated (losing a race is reuse: two holders
+     of one refresh token. Revoke the whole family, the winner's new token
+     included; `invalid_grant`);
+  4. revoke the old graphql token (a failure is logged and does not fail the
+     response: the new pair is already stored);
   5. return both.
+  When graphql cannot answer `tokenIsRevoked` (the company no longer opens),
+  the grant is refused (`invalid_grant`) without revoking anything.
 - **Reuse detection:** presenting a rotated refresh token revokes the whole
-  family and its current graphql token; `invalid_grant`.
+  family and its current graphql token; `invalid_grant`. A token graphql
+  cannot revoke is logged and skipped; the rest of the family still goes.
+- **Code replay racing the first exchange:** the replay marks the code
+  (`replayed_at`), then revokes the family; the first exchange, after saving
+  its refresh row, re-reads the code and, if marked, revokes the family and
+  answers `invalid_grant`. Whichever order the two run in, nothing issued
+  from a replayed code survives.
 - **User revocation:** each connection is one `graphql_machine_token` row
   labelled "Claude (MCP) – <client>". `bin/fa-token revoke` ends the access
   token at once and makes the next refresh fail.
@@ -341,7 +352,9 @@ is the intended credential. No OAuth, no refresh.
 5. **Bearer:** missing → the `401` of §5.3. Not decoded here; `Executor` is the
    one source of truth.
 6. Parse and dispatch (§6). The client IP passed to `Executor` is the real
-   end-client address, resolved with `trust_proxy` *imscp (h)*.
+   end-client address, resolved with `trust_proxy` *imscp (h)*: the rightmost
+   `X-Forwarded-For` entry, the one the trusted proxy appended (entries left of
+   it are client-supplied). The same address feeds the OAuth per-IP limits.
 7. `ExecutorAuthException` `UNAUTHENTICATED` → `401`,
    `WWW-Authenticate: Bearer error="invalid_token", resource_metadata=…`;
    `FORBIDDEN` → `403` JSON `{"error":"NO_API_ACCESS"}`.
@@ -420,7 +433,10 @@ only where the extension is active.
   → string, `Int` → integer, `Float` → number, `Boolean` → boolean, custom
   scalars → string (with the scalar's description), enums → `enum`, input
   objects → nested objects (recursion capped at depth 6), lists → arrays,
-  non-null → `required`. Argument and type descriptions are carried over.
+  non-null → `required`. A nullable argument, input field or list item also
+  accepts `null` (its `type` gains `"null"`, an enum's values gain `null`), as
+  GraphQL does; an explicit `null` is passed through as the variable's value.
+  Non-null types stay strict. Argument and type descriptions are carried over.
   `MangoInput.selector` (a JSON-encoded `String` in graphql) accepts a JSON
   object or its JSON-encoded string; an object is encoded before sending.
 - **Selection set** (`SelectionBuilder`): every scalar and enum field of the
@@ -437,11 +453,13 @@ only where the extension is active.
   missing `query.limit` is set to `default_list_limit` (50); the result notes
   `"limit applied: 50; pass query.limit or query.skip for more"` when exactly
   that many rows come back.
-- **Annotations:** fields named `*List`, `me`, `recurringDueList` →
-  `readOnlyHint: true`; `*Delete` → `destructiveHint: true`; `*Update` →
-  `idempotentHint: true`; `invoiceEmail`, `recurringGenerate` →
-  `openWorldHint: true` (they send e-mail); other mutations
-  `destructiveHint: false`. Every mutation tool `requiresWrite`.
+- **Annotations:** every generated query tool (root `Query` field: `*List`,
+  `*Get`, `me`, `recurringDueList`, …) → `readOnlyHint: true`,
+  `idempotentHint: true`. Mutation tools → `readOnlyHint: false`; `*Delete` →
+  `destructiveHint: true`; `*Update` → `idempotentHint: true`; `invoiceEmail`,
+  `recurringGenerate` → `openWorldHint: true` (they send e-mail); other
+  mutations `destructiveHint: false`. Every mutation tool `requiresWrite`, and
+  only those: `requiresWrite` is exactly "not `readOnlyHint`".
 - **Description:** the GraphQL field description; fallback
   "<Query|Mutation> `<field>` of the FrontAccounting GraphQL API."
 
@@ -478,7 +496,10 @@ Both executing tools go through `Executor::execute`.
   resolution, the address pinned for the fetch); 5 s timeout, 64 KB cap, no
   redirects; the document's `client_id` must equal the URL; cached in
   `mcp_oauth_client` for `cimd_cache_ttl`; lookups of new URLs rate-limited per
-  source IP; failures cached too (300 s). A failed refetch of a known document
+  source IP; failures cached too (300 s). The document gets DCR's limits (10
+  `redirect_uris` of at most 512 bytes, `client_name` of at most 255 bytes);
+  over them it fails like any bad document (`invalid_client`, cached as a
+  failure). A failed refetch of a known document
   keeps the cached copy only while its last successful fetch is younger than
   2 × `cimd_cache_ttl`; after that `/authorize` answers `invalid_client`.
 - **DCR:** open (Claude.ai needs it), `dcr_rate_limit` per source IP per hour;
@@ -534,7 +555,7 @@ which in a `company` column.
   succeeded), `source_ip`.
 - `0_mcp_oauth_code`: `code_hash` (PK, char 64), `client_id`, `company`,
   `login`, `redirect_uri`, `code_challenge`, `scope`, `resource`, `expires_at`,
-  `used_at`.
+  `used_at`, `replayed_at` (set when a used code is presented again; §5.4).
 - `0_mcp_oauth_refresh`: `id` (PK), `token_hash` (unique, char 64), `family`
   (char 32), `client_id`, `company`, `login`, `scope`, `graphql_jti`,
   `expires_at`, `rotated_at`, `revoked_at`, `created_at`.
@@ -556,7 +577,8 @@ company mcp is activated for.
 | Unknown method | `-32601` |
 | Unknown or hidden tool; arguments fail the schema | `-32602` |
 | GraphQL error in a tool | `200`, `isError: true`, text `"<CODE>: <message>"`; `FA_REJECTED` adds FA's messages, warnings are appended |
-| No, invalid, expired or revoked token | `401` + `WWW-Authenticate: Bearer error="invalid_token", resource_metadata=…` |
+| No token | `401` + `WWW-Authenticate: Bearer resource_metadata=…` (no `error`, RFC 6750 §3.1), JSON `{"error":"UNAUTHENTICATED"}` |
+| Invalid, expired or revoked token | `401` + `WWW-Authenticate: Bearer error="invalid_token", resource_metadata=…`, JSON `{"error":"invalid_token"}` |
 | User lacks `SA_GRAPHQL` | `403` JSON `{"error":"NO_API_ACCESS"}` |
 | (both rows above) | The JSON body may carry a `message` beside `error` |
 | graphql missing, inactive or wrong contract | `503 text/plain` |
