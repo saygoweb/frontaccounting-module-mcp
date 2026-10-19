@@ -27,12 +27,26 @@ class ClientRegistryTest extends TestCase
         $this->store = new InMemoryStore();
     }
 
-    private function registry(array $config = []): ClientRegistry
+    /** @param bool|null $prune whether each chance to prune takes it; null: one in fifty at random */
+    private function registry(array $config = [], ?bool $prune = null): ClientRegistry
     {
         $cimd = new CimdFetcher($this->http, function () {
             return ['93.184.216.34'];
         });
-        return new ClientRegistry($this->store, $cimd, Config::fromArray($config), $this->clock);
+        $sample = $prune === null ? null : function () use ($prune): bool {
+            return $prune;
+        };
+        return new ClientRegistry($this->store, $cimd, Config::fromArray($config), $this->clock, $sample);
+    }
+
+    /** A DCR client row last used 31 days ago, holding no refresh token. */
+    private function idleClient(string $id): void
+    {
+        $this->store->saveClient([
+            'client_id' => $id, 'kind' => 'dcr', 'client_name' => 'Idle',
+            'redirect_uris' => '["https://idle.example/cb"]', 'created_at' => $this->clock->now() - 31 * 86400,
+            'last_used_at' => null, 'fetched_at' => null, 'fetch_ok_at' => null, 'source_ip' => self::IP,
+        ]);
     }
 
     private function expectOAuthError(callable $fn, string $error, int $status = 400): OAuthError
@@ -346,6 +360,117 @@ class ClientRegistryTest extends TestCase
         $this->assertNotNull($this->store->findClient($kept->clientId()));
         $this->assertNull($this->store->findClient($gone->clientId()));
         $this->assertNull($this->store->findClient($expired->clientId()));
+    }
+
+    public function testCimdResolutionPrunesWithDcrDisabled(): void
+    {
+        $this->idleClient('idle');
+        $this->cannedCimd();
+        $this->registry(['allow_dcr' => false], true)->resolve(self::CIMD_URL, self::IP);
+        $this->assertNull($this->store->findClient('idle'));
+        $this->assertNotNull($this->store->findClient(self::CIMD_URL));
+    }
+
+    public function testTokenEndpointResolutionPrunesWithDcrDisabled(): void
+    {
+        $this->idleClient('idle');
+        $registry = $this->registry(['allow_dcr' => false], true);
+        $this->expectOAuthError(function () use ($registry) {
+            $registry->resolveForToken('0123456789abcdef0123456789abcdef');
+        }, 'invalid_client', 401);
+        $this->assertNull($this->store->findClient('idle'));
+    }
+
+    public function testNoPruneWhenTheSampleSaysNo(): void
+    {
+        $this->idleClient('idle');
+        $this->cannedCimd();
+        $registry = $this->registry(['allow_dcr' => false], false);
+        $registry->resolve(self::CIMD_URL, self::IP);
+        $registry->resolveForToken(self::CIMD_URL);
+        $this->assertNotNull($this->store->findClient('idle'));
+    }
+
+    public function testStaleCimdGraceEndsTwoCachePeriodsAfterTheLastGoodFetch(): void
+    {
+        $this->cannedCimd();
+        $registry = $this->registry(['cimd_cache_ttl' => 3600]);
+        $registry->resolve(self::CIMD_URL, self::IP);
+        $this->assertNotNull($this->store->findClient(self::CIMD_URL)['fetch_ok_at']);
+
+        // Host down: failed refetches keep the document while the last good
+        // fetch is younger than 2 x 3600 s.
+        $this->http->responses = [];
+        $this->clock->advance(3601);
+        $this->assertSame('Example App', $registry->resolve(self::CIMD_URL, self::IP)->name());
+        $this->clock->advance(3300); // 6901 s since the good fetch
+        $this->assertSame('Example App', $registry->resolve(self::CIMD_URL, self::IP)->name());
+        $calls = count($this->http->calls);
+
+        // At 7200 s - still inside the 300 s backoff of that last failure,
+        // so no fetch - the cached document is no longer used.
+        $this->clock->advance(299); // 7200 s
+        $this->expectOAuthError(function () use ($registry) {
+            $registry->resolve(self::CIMD_URL, self::IP);
+        }, 'invalid_client', 401);
+        $this->assertCount($calls, $this->http->calls);
+
+        // After the backoff it is fetched again, fails, and is still refused.
+        $this->clock->advance(300);
+        $this->expectOAuthError(function () use ($registry) {
+            $registry->resolve(self::CIMD_URL, self::IP);
+        }, 'invalid_client', 401);
+        $this->assertCount($calls + 1, $this->http->calls);
+
+        // Once the host is back a fetch succeeds and starts a new grace period.
+        $this->clock->advance(300);
+        $this->cannedCimd();
+        $this->assertSame('Example App', $registry->resolve(self::CIMD_URL, self::IP)->name());
+        $this->assertSame($this->clock->now(), $this->store->findClient(self::CIMD_URL)['fetch_ok_at']);
+    }
+
+    public function testTooManyRedirectUrisRejected(): void
+    {
+        $uris = [];
+        for ($i = 0; $i < 11; $i++) {
+            $uris[] = 'https://app.example/cb' . $i;
+        }
+        $registry = $this->registry();
+        $this->expectOAuthError(function () use ($registry, $uris) {
+            $registry->register($this->metadata(['redirect_uris' => $uris]), self::IP);
+        }, 'invalid_client_metadata');
+        $this->assertCount(10, $registry->register(
+            $this->metadata(['redirect_uris' => array_slice($uris, 0, 10)]),
+            self::IP
+        )->redirectUris());
+    }
+
+    public function testOverlongRedirectUriRejected(): void
+    {
+        $prefix = 'https://app.example/';
+        $registry = $this->registry();
+        $this->expectOAuthError(function () use ($registry, $prefix) {
+            $uri = $prefix . str_repeat('a', 513 - strlen($prefix));
+            $registry->register($this->metadata(['redirect_uris' => [$uri]]), self::IP);
+        }, 'invalid_client_metadata');
+        $uri = $prefix . str_repeat('a', 512 - strlen($prefix));
+        $this->assertSame([$uri], $registry->register(
+            $this->metadata(['redirect_uris' => [$uri]]),
+            self::IP
+        )->redirectUris());
+    }
+
+    public function testClientNameLimitIsInBytes(): void
+    {
+        $registry = $this->registry();
+        // 86 characters, 258 bytes.
+        $this->expectOAuthError(function () use ($registry) {
+            $registry->register($this->metadata(['client_name' => str_repeat('✓', 86)]), self::IP);
+        }, 'invalid_client_metadata');
+        $this->assertSame(
+            str_repeat('✓', 85),
+            $registry->register($this->metadata(['client_name' => str_repeat('✓', 85)]), self::IP)->name()
+        );
     }
 
     public function testNewCimdLookupsAreRateLimitedPerIp(): void

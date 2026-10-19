@@ -18,7 +18,7 @@ namespace FA\Mcp\OAuth;
 final class PdoStore implements Store
 {
     private const CLIENT_COLUMNS = 'client_id, kind, client_name, redirect_uris, created_at, last_used_at,'
-        . ' fetched_at, source_ip';
+        . ' fetched_at, fetch_ok_at, source_ip';
     private const CODE_COLUMNS = 'code_hash, client_id, company, login, redirect_uri, code_challenge, scope,'
         . ' resource, expires_at, used_at';
     private const REFRESH_COLUMNS = 'id, token_hash, family, client_id, company, login, scope, graphql_jti,'
@@ -57,16 +57,16 @@ final class PdoStore implements Store
     public function saveClient(array $row): void
     {
         $this->run(
-            "INSERT INTO {$this->client} (" . self::CLIENT_COLUMNS . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO {$this->client} (" . self::CLIENT_COLUMNS . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     kind = VALUES(kind), client_name = VALUES(client_name),
                     redirect_uris = VALUES(redirect_uris), created_at = VALUES(created_at),
                     last_used_at = VALUES(last_used_at), fetched_at = VALUES(fetched_at),
-                    source_ip = VALUES(source_ip)',
+                    fetch_ok_at = VALUES(fetch_ok_at), source_ip = VALUES(source_ip)',
             [
                 (string)$row['client_id'], (string)$row['kind'], (string)$row['client_name'],
                 (string)$row['redirect_uris'], self::toDb($row['created_at']), self::toDb($row['last_used_at']),
-                self::toDb($row['fetched_at']), (string)$row['source_ip'],
+                self::toDb($row['fetched_at']), self::toDb($row['fetch_ok_at'] ?? null), (string)$row['source_ip'],
             ]
         );
     }
@@ -246,6 +246,7 @@ final class PdoStore implements Store
         $row['created_at'] = (int)self::fromDb($row['created_at']);
         $row['last_used_at'] = self::fromDb($row['last_used_at']);
         $row['fetched_at'] = self::fromDb($row['fetched_at']);
+        $row['fetch_ok_at'] = self::fromDb($row['fetch_ok_at']);
         return $row;
     }
 

@@ -66,6 +66,56 @@ class CimdFetcherTest extends TestCase
         ];
     }
 
+    /** One address inside each blocked range, IPv4 ones also as IPv4-mapped and IPv4-compatible IPv6. */
+    public function blockedRangeAddresses(): array
+    {
+        $v4 = [
+            '0.0.0.0/8' => '0.1.2.3', '10.0.0.0/8' => '10.9.9.9', '100.64.0.0/10' => '100.127.255.254',
+            '127.0.0.0/8' => '127.1.1.1', '169.254.0.0/16' => '169.254.1.1', '172.16.0.0/12' => '172.31.0.1',
+            '192.0.0.0/24' => '192.0.0.8', '192.0.2.0/24' => '192.0.2.10', '192.168.0.0/16' => '192.168.255.1',
+            '198.18.0.0/15' => '198.19.255.1', '198.51.100.0/24' => '198.51.100.7',
+            '203.0.113.0/24' => '203.0.113.9', '224.0.0.0/4' => '239.1.1.1', '240.0.0.0/4' => '250.1.2.3',
+            '255.255.255.255' => '255.255.255.255',
+        ];
+        $cases = [];
+        foreach ($v4 as $range => $address) {
+            $cases[$range] = [$address];
+            $cases[$range . ' IPv4-mapped'] = ['::ffff:' . $address];
+            $cases[$range . ' IPv4-compatible'] = ['::' . $address];
+        }
+        return $cases + [
+            '::/96 IPv4-compatible public' => ['::93.184.216.34'],
+            '100::/64 discard-only' => ['100::1'],
+            '2001:db8::/32 documentation' => ['2001:db8:1234::1'],
+            '64:ff9b::/96 NAT64' => ['64:ff9b::a00:1'],
+            '2002::/16 6to4' => ['2002:a00:1::1'],
+            'fc00::/7 ULA' => ['fc00::1'],
+            'ff00::/8 multicast' => ['ff02::1'],
+        ];
+    }
+
+    /** @dataProvider blockedRangeAddresses */
+    public function testBlockedRangeIsNotPublic(string $address): void
+    {
+        $this->assertFalse(CimdFetcher::isPublic($address));
+    }
+
+    /** Just outside the blocked ranges. */
+    public function publicAddresses(): array
+    {
+        return [
+            ['93.184.216.34'], ['192.0.1.1'], ['192.0.3.1'], ['198.17.255.255'], ['198.20.0.1'],
+            ['198.51.101.1'], ['203.0.114.1'], ['223.255.255.255'], ['100.128.0.1'],
+            ['2606:2800:220:1:248:1893:25c8:1946'], ['100:0:0:1::1'], ['2001:db9::1'], ['2001:4860::8888'],
+        ];
+    }
+
+    /** @dataProvider publicAddresses */
+    public function testAddressOutsideTheBlockedRangesIsPublic(string $address): void
+    {
+        $this->assertTrue(CimdFetcher::isPublic($address));
+    }
+
     /** @dataProvider nonPublicAddresses */
     public function testNonPublicAddressRejectedBeforeFetching(string $address): void
     {

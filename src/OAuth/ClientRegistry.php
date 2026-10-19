@@ -16,18 +16,35 @@ final class ClientRegistry
     public const PRUNE_ONE_IN = 50;
     public const MAX_CLIENT_ID_LENGTH = 255; // mcp_oauth_client.client_id
     public const FAILED_FETCH_SECONDS = 300;
+    public const MAX_REDIRECT_URIS = 10;
+    public const MAX_REDIRECT_URI_BYTES = 512;
+    public const MAX_CLIENT_NAME_BYTES = 255; // mcp_oauth_client.client_name
 
     private Store $store;
     private CimdFetcher $cimd;
     private Config $config;
     private Clock $clock;
+    /** @var callable(): bool whether this chance to prune is taken */
+    private $pruneSample;
 
-    public function __construct(Store $store, CimdFetcher $cimd, Config $config, Clock $clock)
-    {
+    /**
+     * @param callable|null $pruneSample callable(): bool, asked at each chance
+     *                                   to prune; null takes one in PRUNE_ONE_IN
+     */
+    public function __construct(
+        Store $store,
+        CimdFetcher $cimd,
+        Config $config,
+        Clock $clock,
+        ?callable $pruneSample = null
+    ) {
         $this->store = $store;
         $this->cimd = $cimd;
         $this->config = $config;
         $this->clock = $clock;
+        $this->pruneSample = $pruneSample ?? function (): bool {
+            return random_int(1, self::PRUNE_ONE_IN) === 1;
+        };
     }
 
     /**
@@ -45,12 +62,7 @@ final class ClientRegistry
 
         $now = $this->clock->now();
 
-        // Registration is open to anyone, so the table needs a sweep nobody
-        // has to schedule. One call in fifty is often enough to keep it small
-        // and rare enough that registration stays cheap.
-        if (random_int(1, self::PRUNE_ONE_IN) === 1) {
-            $this->prune();
-        }
+        $this->maybePrune();
 
         $recent = $this->store->countClientsFromIpSince($sourceIp, $now - 3600, 'dcr');
         if ($recent >= $this->config->dcrRateLimit) {
@@ -61,7 +73,19 @@ final class ClientRegistry
         if (!is_array($uris) || !$uris) {
             throw new OAuthError('invalid_redirect_uri', 'redirect_uris must be a non-empty array');
         }
+        if (count($uris) > self::MAX_REDIRECT_URIS) {
+            throw new OAuthError(
+                'invalid_client_metadata',
+                'At most ' . self::MAX_REDIRECT_URIS . ' redirect URIs may be registered'
+            );
+        }
         foreach ($uris as $uri) {
+            if (is_string($uri) && strlen($uri) > self::MAX_REDIRECT_URI_BYTES) {
+                throw new OAuthError(
+                    'invalid_client_metadata',
+                    'Each redirect URI must be at most ' . self::MAX_REDIRECT_URI_BYTES . ' bytes'
+                );
+            }
             if (!is_string($uri) || !RedirectUriPolicy::isAcceptable($uri)) {
                 throw new OAuthError(
                     'invalid_redirect_uri',
@@ -72,10 +96,13 @@ final class ClientRegistry
 
         $name = self::DEFAULT_NAME;
         if (array_key_exists('client_name', $metadata) && $metadata['client_name'] !== null) {
-            if (!is_string($metadata['client_name']) || mb_strlen($metadata['client_name']) > 255) {
+            if (
+                !is_string($metadata['client_name'])
+                || strlen($metadata['client_name']) > self::MAX_CLIENT_NAME_BYTES
+            ) {
                 throw new OAuthError(
                     'invalid_client_metadata',
-                    'client_name must be a string of at most 255 characters'
+                    'client_name must be a string of at most ' . self::MAX_CLIENT_NAME_BYTES . ' bytes'
                 );
             }
             if (trim($metadata['client_name']) !== '') {
@@ -102,6 +129,7 @@ final class ClientRegistry
             'created_at' => $now,
             'last_used_at' => null,
             'fetched_at' => null,
+            'fetch_ok_at' => null,
             'source_ip' => $sourceIp,
         ]);
         return $client;
@@ -109,8 +137,9 @@ final class ClientRegistry
 
     /**
      * Delete clients unused for 30 days that hold no usable refresh token,
-     * codes long expired, and refresh rows past their expiry. Called now and
-     * then from register() and the token endpoint.
+     * codes long expired, and refresh rows past their expiry. Run on one call
+     * in PRUNE_ONE_IN of register(), of CIMD resolution at /authorize and of
+     * resolveForToken() at /token - so it runs whether or not DCR is allowed.
      */
     public function prune(): void
     {
@@ -148,6 +177,7 @@ final class ClientRegistry
      */
     public function resolveForToken(string $clientId): Client
     {
+        $this->maybePrune();
         if (stripos($clientId, 'https://') !== 0) {
             return $this->resolveDcr($clientId);
         }
@@ -158,6 +188,18 @@ final class ClientRegistry
             throw new OAuthError('invalid_client', 'Unknown client', 401);
         }
         return self::fromRow($row);
+    }
+
+    /**
+     * Anyone can register or name a client, so the table needs a sweep nobody
+     * has to schedule. One call in fifty is often enough to keep it small and
+     * rare enough that the calls stay cheap.
+     */
+    private function maybePrune(): void
+    {
+        if (call_user_func($this->pruneSample) === true) {
+            $this->prune();
+        }
     }
 
     public function touch(string $clientId): void
@@ -191,6 +233,7 @@ final class ClientRegistry
     private function resolveCimd(string $url, string $sourceIp): Client
     {
         $this->checkCimdId($url);
+        $this->maybePrune();
 
         $now = $this->clock->now();
         $row = $this->store->findClient($url);
@@ -210,13 +253,13 @@ final class ClientRegistry
             $fetchedAt = (int)$row['fetched_at'];
             if (self::isFailedFetch($row)) {
                 if ($fetchedAt + self::FAILED_FETCH_SECONDS > $now) {
-                    throw new OAuthError(
-                        'invalid_client',
-                        'The client metadata document could not be used; try again later',
-                        401
-                    );
+                    throw self::unusable();
                 }
             } elseif ($fetchedAt + $this->config->cimdCacheTtl > $now) {
+                // Fresh, or inside the backoff after a failed refetch.
+                if (!$this->withinGrace($row, $now)) {
+                    throw self::unusable();
+                }
                 return self::fromRow($row);
             }
         }
@@ -229,10 +272,15 @@ final class ClientRegistry
             // again and again costs one fetch per FAILED_FETCH_SECONDS, not
             // one per request. A client already known keeps its cached
             // document for that while instead: its host being briefly down
-            // must not sign out everyone using it.
-            if ($known) {
+            // must not sign out everyone using it. Only briefly, though: once
+            // the last good fetch is two cache periods old, the document is
+            // no longer used at /authorize.
+            if ($known && $row !== null) {
                 $row['fetched_at'] = $now - $this->config->cimdCacheTtl + self::FAILED_FETCH_SECONDS;
                 $this->store->saveClient($row);
+                if (!$this->withinGrace($row, $now)) {
+                    throw self::unusable($e);
+                }
                 return self::fromRow($row);
             }
             $this->store->saveClient([
@@ -243,6 +291,7 @@ final class ClientRegistry
                 'created_at' => $row !== null ? (int)$row['created_at'] : $now,
                 'last_used_at' => null,
                 'fetched_at' => $now,
+                'fetch_ok_at' => null,
                 'source_ip' => $ip,
             ]);
             throw $e;
@@ -256,9 +305,33 @@ final class ClientRegistry
             'created_at' => $row !== null ? (int)$row['created_at'] : $now,
             'last_used_at' => $row !== null && $row['last_used_at'] !== null ? (int)$row['last_used_at'] : null,
             'fetched_at' => $now,
+            'fetch_ok_at' => $now,
             'source_ip' => $ip,
         ]);
         return $client;
+    }
+
+    /**
+     * Whether a cached CIMD document may still be used: its last successful
+     * fetch is younger than two cache periods.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function withinGrace(array $row, int $now): bool
+    {
+        $ok = $row['fetch_ok_at'] ?? null;
+        return $ok !== null && (int)$ok + 2 * $this->config->cimdCacheTtl > $now;
+    }
+
+    private static function unusable(?\Throwable $previous = null): OAuthError
+    {
+        return new OAuthError(
+            'invalid_client',
+            'The client metadata document could not be used; try again later',
+            401,
+            false,
+            $previous
+        );
     }
 
     /** A CIMD row recording a failed fetch: no redirect URIs, which a good document never has. */

@@ -15,7 +15,7 @@ use FA\Mcp\Tests\Unit\OAuth\StoreContractTest;
 class PdoStoreTest extends StoreContractTest
 {
     private const PREFIX = 'zz_';
-    private const TABLES = ['mcp_oauth_client', 'mcp_oauth_code', 'mcp_oauth_refresh', 'mcp_oauth_rate'];
+    private const TABLES = ['mcp_oauth_client', 'mcp_oauth_code', 'mcp_oauth_refresh'];
 
     private ?\PDO $pdo = null;
 

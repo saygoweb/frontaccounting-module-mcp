@@ -6,7 +6,10 @@ namespace FA\Mcp\OAuth;
  * Persistence for the OAuth tables (spec §9). Rows are associative arrays
  * whose keys are the columns; times are Unix seconds (int, or null where the
  * column is nullable); company and id are int; redirect_uris is the stored
- * JSON string; a code's resource is a string or null.
+ * JSON string; a code's resource is a string or null. A client's fetched_at
+ * is when its CIMD document was last tried (a failed refetch moves it to
+ * start a backoff) and fetch_ok_at when it was last fetched successfully.
+ * client_id compares case-sensitively, as a URL path does.
  *
  * A code and a refresh row belong to one (company, login): FA user names are
  * per company, so the pair is the identity, and graphql_jti names the graphql

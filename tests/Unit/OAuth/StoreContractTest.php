@@ -34,6 +34,7 @@ abstract class StoreContractTest extends TestCase
             'created_at' => self::T,
             'last_used_at' => null,
             'fetched_at' => null,
+            'fetch_ok_at' => null,
             'source_ip' => '203.0.113.1',
         ], $overrides);
     }
@@ -89,10 +90,26 @@ abstract class StoreContractTest extends TestCase
 
         $replaced = $this->clientRow('c1', [
             'kind' => 'cimd', 'client_name' => '', 'redirect_uris' => '[]',
-            'last_used_at' => self::T + 5, 'fetched_at' => self::T + 6, 'source_ip' => '2001:db8::1',
+            'last_used_at' => self::T + 5, 'fetched_at' => self::T + 6, 'fetch_ok_at' => self::T + 4,
+            'source_ip' => '2001:db8::1',
         ]);
         $this->store->saveClient($replaced);
         $this->assertRow($replaced, $this->store->findClient('c1'));
+    }
+
+    public function testClientIdsAreCaseSensitive(): void
+    {
+        $this->store->saveClient($this->clientRow('https://app.example/Client.json', ['client_name' => 'Upper']));
+        $this->store->saveClient($this->clientRow('https://app.example/client.json', ['client_name' => 'Lower']));
+        $this->assertSame('Upper', $this->store->findClient('https://app.example/Client.json')['client_name']);
+        $this->assertSame('Lower', $this->store->findClient('https://app.example/client.json')['client_name']);
+        $this->assertNull($this->store->findClient('https://app.example/CLIENT.json'));
+
+        // A live refresh token keeps only the client whose id matches exactly.
+        $this->store->saveRefresh($this->refreshRow('h1', ['client_id' => 'https://app.example/client.json']));
+        $this->store->pruneUnusedClients(self::T + 1, self::T);
+        $this->assertNull($this->store->findClient('https://app.example/Client.json'));
+        $this->assertNotNull($this->store->findClient('https://app.example/client.json'));
     }
 
     public function testTouchClient(): void

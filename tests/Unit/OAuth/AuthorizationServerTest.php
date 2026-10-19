@@ -40,6 +40,7 @@ class AuthorizationServerTest extends TestCase
         $this->clock = new FixedClock();
         $this->store = new InMemoryStore();
         $this->accounts = new FakeAccountGateway();
+        $this->accounts->clock = $this->clock;
         $this->accounts->addUser(self::COMPANY, self::LOGIN);
         $this->config = Config::fromArray(['base_url' => self::BASE]);
         $this->http = new FakeHttpFetcher();
@@ -216,10 +217,23 @@ class AuthorizationServerTest extends TestCase
         $this->assertSame($this->clock->now() + 7200, $this->refreshRow($response['refresh_token'])['expires_at']);
     }
 
+    public function testExpiresInIsTheIssuedTokensRemainingLifetime(): void
+    {
+        $this->accounts->expiresAt = $this->clock->now() + 1234;
+        $this->assertSame(1234, $this->exchange($this->code())['expires_in']);
+    }
+
+    public function testExpiresInIsNeverNegative(): void
+    {
+        $this->accounts->expiresAt = $this->clock->now() - 5;
+        $this->assertSame(0, $this->exchange($this->code())['expires_in']);
+    }
+
     public function testTokenLabelIsCutTo255Bytes(): void
     {
+        // A 254-byte name, within DCR's 255, still makes a label over 255 bytes.
         $long = $this->clients->register(
-            ['client_name' => str_repeat('é', 255), 'redirect_uris' => [self::REDIRECT]],
+            ['client_name' => str_repeat('é', 127), 'redirect_uris' => [self::REDIRECT]],
             self::IP
         );
         $validated = $this->server->validateAuthorizeRequest(

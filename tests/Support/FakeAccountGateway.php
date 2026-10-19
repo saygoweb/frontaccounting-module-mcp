@@ -32,6 +32,12 @@ final class FakeAccountGateway implements AccountGateway
      */
     public $beforeIssue;
 
+    /** @var FixedClock|null issued tokens expire $ttlSeconds after its now(), else after 1700000000 */
+    public ?FixedClock $clock = null;
+
+    /** @var int|null when set, the expiresAt every issued token reports, whatever the TTL */
+    public ?int $expiresAt = null;
+
     /** @var array[] each ['company', 'login', 'scope', 'ttl', 'label', 'jti', 'token'], in call order */
     public array $issued = [];
 
@@ -123,7 +129,8 @@ final class FakeAccountGateway implements AccountGateway
             'company' => $company, 'login' => $login, 'scope' => $scope, 'ttl' => $ttlSeconds,
             'label' => $label, 'jti' => $jti, 'token' => $token,
         ];
-        return ['token' => $token, 'jti' => $jti, 'expiresAt' => 1700000000 + $ttlSeconds];
+        $expiresAt = $this->expiresAt ?? ($this->clock !== null ? $this->clock->now() : 1700000000) + $ttlSeconds;
+        return ['token' => $token, 'jti' => $jti, 'expiresAt' => $expiresAt];
     }
 
     public function revokeToken(int $company, string $jti): bool

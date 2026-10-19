@@ -17,14 +17,19 @@ final class CimdFetcher
     public const MAX_BYTES = 65536;
 
     /**
-     * Never fetched. Beyond the spec's list: IPv6 multicast, and the NAT64 and
-     * 6to4 prefixes, each of which can carry a private IPv4 address inside an
-     * IPv6 one.
+     * Never fetched: private, shared, loopback, link-local, documentation,
+     * benchmarking, reserved, broadcast and multicast space. On the IPv6 side
+     * ::/96 (unspecified, loopback and IPv4-compatible) and ::ffff:0:0/96
+     * (every IPv4-mapped address, so the mapped form of each IPv4 range above
+     * is blocked too), the discard prefix, documentation, the NAT64 and 6to4
+     * prefixes (each can carry a private IPv4 address inside an IPv6 one),
+     * ULA, link-local and multicast.
      */
     public const BLOCKED = [
         '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16',
-        '172.16.0.0/12', '192.168.0.0/16', '224.0.0.0/4', '240.0.0.0/4',
-        '::/128', '::1/128', '::ffff:0:0/96', '64:ff9b::/96', '2002::/16',
+        '172.16.0.0/12', '192.0.0.0/24', '192.0.2.0/24', '192.168.0.0/16', '198.18.0.0/15',
+        '198.51.100.0/24', '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4', '255.255.255.255',
+        '::/96', '::ffff:0:0/96', '100::/64', '2001:db8::/32', '64:ff9b::/96', '2002::/16',
         'fc00::/7', 'fe80::/10', 'ff00::/8',
     ];
 

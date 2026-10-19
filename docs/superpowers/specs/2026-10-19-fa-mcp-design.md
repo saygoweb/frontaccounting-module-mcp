@@ -93,9 +93,11 @@ sql/update_1.0.sql   OAuth tables (§9)
 src/Http/            McpAction, Middleware (HeaderNormaliser, Tls, Origin, Cors, Bearer), JsonErrorMiddleware
 src/Protocol/        ProtocolServer, McpServer, Versions, RpcError, HttpOutcome (ported)
 src/Tool/            Tool, ToolResult, ToolCatalog, SchemaToolFactory, SelectionBuilder,
-                     JsonSchemaMapper, InputValidator, EscapeHatch/{Schema,Query,Mutate}
-src/OAuth/           Metadata, Pkce, RedirectUriPolicy, ClientResolver, CimdFetcher, CodeService,
-                     RefreshService, Store (PDO), InMemoryStore; Http/{Authorize,Token,Register,Metadata}Action
+                     JsonSchemaMapper, InputValidator, ScopeProbe,
+                     EscapeHatch/{GraphQlSchema,GraphQlQuery,GraphQlMutate}
+src/OAuth/           AuthorizationServer (codes, token endpoint, refresh), ClientRegistry (DCR, CIMD cache),
+                     CimdFetcher, Pkce, RedirectUriPolicy, Store (interface), PdoStore, InMemoryStore,
+                     Metadata, OAuthError, Clock; Http/{Authorize,Token,Register,Metadata}Action
 src/OAuth/Page/      login and consent templates (self-contained HTML, no FA theme)
 src/Gateway/         GraphQlGateway, AccountGateway (interfaces), ExecutorGraphQlGateway, ExecutorAccountGateway
 src/Config.php
@@ -165,16 +167,23 @@ final class Executor
     /** [companyId => name] from config_db.php, for the OAuth login form. */
     public function companies(): array;
 
-    /** FA's own password check (current_user::login, login_delay applies), then SA_GRAPHQL. */
-    public function authenticate(int $company, string $login, string $password): string; // 'OK' | 'BAD_CREDENTIALS' | 'NO_API_ACCESS'
+    /**
+     * FA's own password check (current_user::login, login_delay applies), then SA_GRAPHQL.
+     * @return array{status: string, login: string} status 'OK' | 'BAD_CREDENTIALS' | 'NO_API_ACCESS';
+     *     login as FA stores it ('' unless OK)
+     * @throws ExecutorAuthException UNAUTHENTICATED when the company cannot be opened
+     */
+    public function authenticate(int $company, string $login, string $password, string $clientIp = ''): array;
 
     /**
      * Issue a stored, revocable token (graphql_machine_token row) for a user who
      * has already been authenticated. $scope is 'read' or 'write'.
      * @return array{token: string, jti: string, expiresAt: int}
      */
-    public function issueToken(int $company, string $login, string $scope, int $ttlSeconds, string $label): array;
+    public function issueToken(int $company, string $login, string $scope, int $ttlSeconds, string $label,
+                               string $clientIp = ''): array;
 
+    /** @throws ExecutorAuthException UNAUTHENTICATED when the company cannot be opened */
     public function revokeToken(int $company, string $jti): bool;
 
     /**
@@ -186,7 +195,10 @@ final class Executor
      */
     public function database(int $company): array;
 
-    /** True when the row is missing or revoked. Expiry is ignored *imscp (b)*. */
+    /**
+     * True when the row is missing or revoked. Expiry is ignored *imscp (b)*.
+     * @throws ExecutorAuthException UNAUTHENTICATED when the company cannot be opened
+     */
     public function tokenIsRevoked(int $company, string $jti): bool;
 }
 ```
@@ -309,8 +321,13 @@ is the intended credential. No OAuth, no refresh.
 - **User revocation:** each connection is one `graphql_machine_token` row
   labelled "Claude (MCP) – <client>". `bin/fa-token revoke` ends the access
   token at once and makes the next refresh fail.
-- Expired codes and refresh rows past `expires_at` are pruned on each token
-  request (`DELETE … LIMIT 100`).
+- Refresh rows past `expires_at` are pruned on each token request
+  (`DELETE … LIMIT 100`). Codes, used or not, are kept 24 h past their expiry
+  and pruned after that, so that a used code replayed late still revokes its
+  family (§7).
+- Clients unused for 30 days without a live refresh token are pruned on one
+  call in fifty of DCR registration, of CIMD resolution at `/authorize` and of
+  client lookup at `/token`, so the sweep runs whether or not DCR is allowed.
 
 ### 5.5 One `POST /`
 
@@ -358,12 +375,16 @@ Dual-era, stateless:
 - **`server/discover`:** `resultType: "complete"`, `supportedVersions`,
   `capabilities: {tools: {}}`, `instructions`, `_meta` serverInfo,
   `ttlMs: 3600000`, `cacheScope: "public"`. Every modern result carries
-  `resultType` and the serverInfo `_meta`.
+  `resultType` and the serverInfo `_meta`, and so does `server/discover` sent
+  in the legacy era.
 - **`instructions`:** the caller acts as one FA user in one company; IDs come
   from the list tools; list tools take a Mango `query` (`selector`, `limit`,
   `skip`, `sort`); deletes follow FA's rules (void or cancel).
-- **`tools/list`:** deterministic order (queries, then mutations, then escape
-  hatch, each alphabetical), no pagination. Modern results add
+- **`tools/list`:** deterministic order: generated queries, then generated
+  mutations (each alphabetical), then the escape hatch in the fixed order
+  `graphql_schema`, `graphql_query`, `graphql_mutate`; no pagination. When two
+  tools map to one name (a root field `graphqlQuery`, say), the first in that
+  order is kept and the later one skipped and logged. Modern results add
   `ttlMs: 300000`, `cacheScope: "private"`.
 - **`tools/call`:** unknown or hidden tool → `-32602`; arguments validated
   against `inputSchema` before GraphQL → `-32602` with the failing path.
@@ -400,11 +421,16 @@ only where the extension is active.
   scalars → string (with the scalar's description), enums → `enum`, input
   objects → nested objects (recursion capped at depth 6), lists → arrays,
   non-null → `required`. Argument and type descriptions are carried over.
+  `MangoInput.selector` (a JSON-encoded `String` in graphql) accepts a JSON
+  object or its JSON-encoded string; an object is encoded before sending.
 - **Selection set** (`SelectionBuilder`): every scalar and enum field of the
   return type, plus each object or list-of-object field one level deep with its
   scalars only. An optional `fields` argument (string, a GraphQL selection set
   body) replaces the default; it is spliced into the document and validated by
-  graphql like any other query.
+  graphql like any other query. The spliced document must still be one
+  operation whose only root selection is the tool's own field (unaliased, no
+  fragment beside it); anything else is an `isError` result and GraphQL is not
+  called.
 - **Document:** `query|mutation ($a: T!, …) { field(a: $a, …) { <selection> } }`,
   variable types copied from the argument types.
 - **List limit:** for a root field with a `query: MangoInput` argument, a
@@ -433,7 +459,11 @@ Both executing tools go through `Executor::execute`.
 
 - A `read` connection's `tools/list` hides every tool with `requiresWrite`.
   The token's scope is learned with one `me { scope }` query, cached for the
-  request. Calling a hidden tool is `-32602`; graphql refuses the mutation
+  request, and fails closed: only an explicit `write` is `write`; a GraphQL
+  error, missing data or any other answer is `read`. A schema without
+  `Viewer.scope` (an older graphql, whose tokens are all write) is `write`
+  without a query. `tools/call` probes the scope only for a `requiresWrite`
+  tool. Calling a hidden tool is `-32602`; graphql refuses the mutation
   anyway.
 - No role filtering: FA's `SA_*` areas are checked by graphql at call time and a
   refusal comes back as `isError` "FORBIDDEN: …".
@@ -441,17 +471,23 @@ Both executing tools go through `Executor::execute`.
 ## 7. Security
 
 - **Redirect URIs:** exact match to a registered URI; HTTPS, except loopback
-  `http://localhost:*` / `http://127.0.0.1:*` on any port; no fragments.
+  `http://localhost:*` / `http://127.0.0.1:*` / `http://[::1]:*` on any port;
+  no fragments.
 - **CIMD:** HTTPS only; host must resolve only to public addresses (private,
   loopback, link-local, CGNAT and IPv6 equivalents refused after DNS
   resolution, the address pinned for the fetch); 5 s timeout, 64 KB cap, no
   redirects; the document's `client_id` must equal the URL; cached in
   `mcp_oauth_client` for `cimd_cache_ttl`; lookups of new URLs rate-limited per
-  source IP; failures cached too.
+  source IP; failures cached too (300 s). A failed refetch of a known document
+  keeps the cached copy only while its last successful fetch is younger than
+  2 × `cimd_cache_ttl`; after that `/authorize` answers `invalid_client`.
 - **DCR:** open (Claude.ai needs it), `dcr_rate_limit` per source IP per hour;
-  clients unused for 30 days without a live refresh token are pruned.
-- **Secrets at rest:** codes and refresh tokens stored only as SHA-256, compared
-  with `hash_equals`. Tokens, codes and passwords never reach logs.
+  at most 10 `redirect_uris` of at most 512 bytes each and a `client_name` of
+  at most 255 bytes (else `400 invalid_client_metadata`); clients unused for
+  30 days without a live refresh token are pruned (§5.4).
+- **Secrets at rest:** codes and refresh tokens are never stored in clear: only
+  their SHA-256, which is how they are looked up (an indexed key). Tokens, codes
+  and passwords never reach logs.
 - **Codes:** single use, 60 s, PKCE-bound; a second exchange revokes what the
   first issued.
 - **Pages:** CSRF token tied to the module session, `frame-ancestors 'none'`,
@@ -484,7 +520,7 @@ bearer-only use works out of the box.
 
 ## 9. Data model (`sql/update_1.0.sql`, utf8mb4 *imscp (f)*)
 
-All four tables live in **company 0's database** (with company 0's table
+All three tables live in **company 0's database** (with company 0's table
 prefix), whichever company a connection is for. Clients are registered before a
 company is known, and the token endpoint must read the client, the code and the
 refresh row while graphql has the user's company open: graphql allows one
@@ -494,14 +530,18 @@ which in a `company` column.
 
 - `0_mcp_oauth_client`: `client_id` (PK, varchar 255), `kind` (`dcr`|`cimd`),
   `client_name`, `redirect_uris` (JSON text), `created_at`, `last_used_at`,
-  `fetched_at`, `source_ip`.
+  `fetched_at` (last CIMD fetch tried), `fetch_ok_at` (last CIMD fetch that
+  succeeded), `source_ip`.
 - `0_mcp_oauth_code`: `code_hash` (PK, char 64), `client_id`, `company`,
   `login`, `redirect_uri`, `code_challenge`, `scope`, `resource`, `expires_at`,
   `used_at`.
 - `0_mcp_oauth_refresh`: `id` (PK), `token_hash` (unique, char 64), `family`
   (char 32), `client_id`, `company`, `login`, `scope`, `graphql_jti`,
   `expires_at`, `rotated_at`, `revoked_at`, `created_at`.
-- `0_mcp_oauth_rate`: `bucket` (PK: kind + source IP + hour), `count`.
+- Every `client_id` column is `utf8mb4_bin`: a CIMD client_id is a URL, whose
+  path is case-sensitive.
+- No rate table: the DCR and new-CIMD-lookup limits count `mcp_oauth_client`
+  rows by `source_ip` and `created_at`.
 
 `hooks_mcp::activate_extension($company)` checks graphql for `$company`, then
 runs `update_databases(0, …)`, so the tables exist in company 0 whichever
@@ -518,6 +558,7 @@ company mcp is activated for.
 | GraphQL error in a tool | `200`, `isError: true`, text `"<CODE>: <message>"`; `FA_REJECTED` adds FA's messages, warnings are appended |
 | No, invalid, expired or revoked token | `401` + `WWW-Authenticate: Bearer error="invalid_token", resource_metadata=…` |
 | User lacks `SA_GRAPHQL` | `403` JSON `{"error":"NO_API_ACCESS"}` |
+| (both rows above) | The JSON body may carry a `message` beside `error` |
 | graphql missing, inactive or wrong contract | `503 text/plain` |
 | Unexpected exception | `-32603` (message only with `debug`) |
 | OAuth errors | RFC 6749 JSON (`invalid_request`, `invalid_client`, `invalid_grant`, `invalid_scope`, `invalid_target`, `unsupported_grant_type`, `server_error`); errors before redirect-URI validation are HTML pages |

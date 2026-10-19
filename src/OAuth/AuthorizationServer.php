@@ -395,7 +395,7 @@ final class AuthorizationServer
         return [
             'access_token' => (string)$issued['token'],
             'token_type' => 'Bearer',
-            'expires_in' => $this->config->accessTokenTtl,
+            'expires_in' => max(0, (int)$issued['expiresAt'] - $this->clock->now()),
             'refresh_token' => $refresh,
             'scope' => $scope,
         ];
