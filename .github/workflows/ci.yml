@@ -29,7 +29,7 @@ jobs:
       setup: composer install --no-interaction --no-progress
       with: |
         sgw_sales=https://github.com/saygoweb/frontaccounting-module-sgw_sales.git@master
-        graphql=https://github.com/saygoweb/frontaccounting-module-graphql.git@feature/executor
+        graphql=https://github.com/saygoweb/frontaccounting-module-graphql.git@main
       test: sh tools/ci.sh
 
   coverage:
@@ -42,7 +42,7 @@ jobs:
       setup: composer install --no-interaction --no-progress
       with: |
         sgw_sales=https://github.com/saygoweb/frontaccounting-module-sgw_sales.git@master
-        graphql=https://github.com/saygoweb/frontaccounting-module-graphql.git@feature/executor
+        graphql=https://github.com/saygoweb/frontaccounting-module-graphql.git@main
       test: sh tools/coverage.sh
       coverage: build/coverage.xml
     secrets:

@@ -19,6 +19,6 @@
   tables.
 - CI on the FrontAccounting image (cp and upstream, PHP 7.4 and 8.3), Codecov
   coverage and README badges.
-- Temporary: CI uses the GraphQL `feature/executor` branch and FrontAccounting
-  `ci/plugin-coverage`; switch to graphql `main` and FA `master-cp` refs once
-  Executor 1.0 and the shared coverage input are merged.
+- Temporary: CI's coverage job uses FrontAccounting's `ci/plugin-coverage`
+  branch; switch it to `master-cp` once the shared coverage input is merged.
+  The GraphQL module is taken from `main`, which has Executor 1.0.
