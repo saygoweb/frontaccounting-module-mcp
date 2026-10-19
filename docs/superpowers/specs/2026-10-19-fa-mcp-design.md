@@ -102,8 +102,8 @@ src/Config.php
 tests/{Unit,Integration,Http,Support}
 tools/ci.sh, tools/coverage.sh, tools/init.sh
 docs/CONNECTING.md   Claude.ai and Claude Code how-to
-composer.json        php ^7.4||^8.0; ext-json, ext-pdo; slim/slim ^4.11, slim/psr7, php-di ^6
-                     dev: phpunit ^9.6, phpcs, phpstan; webonyx/graphql-php (dev only, see §3.2)
+composer.json        php ^7.4||^8.0; ext-json, ext-pdo (runtime libraries come from graphql's vendor, §3.2)
+                     dev: phpunit ^9.6, phpcs, phpstan; webonyx/graphql-php, slim/slim ^4.11, slim/psr7, php-di ^6
 .github/workflows/ci.yml, codecov.yml
 README.md (badges), LICENSE (GPL-3.0-or-later, as graphql)
 ```
@@ -121,10 +121,12 @@ enforced in four places:
   and graphql's wins. If graphql or `Executor` is missing or the contract major
   differs, every route answers `503 text/plain`
   "FrontAccounting MCP needs the GraphQL module (Executor contract 1.x), active".
-- **Composer:** no runtime dependency on graphql's package. webonyx is a dev
-  dependency only (unit tests parse fixture SDL), kept compatible with graphql's
-  lock (`^15.32`). Slim, PSR-7 and PHP-DI use graphql's constraints so either
-  autoloader can satisfy them.
+- **Composer:** no runtime dependency on graphql's package, and no runtime
+  libraries of its own: webonyx, Slim, PSR-7 and PHP-DI are always loaded from
+  graphql's `vendor/` at runtime, and are dev dependencies here (for the unit
+  suite) with graphql's constraints (`^15.32`, `^4.11`, `^1.6`, `^6.0`). A
+  release ships mcp's `vendor/` with only its own autoloader
+  (`composer install --no-dev`).
 - **CI and dev:** `--with graphql=…` and `--with sgw_sales=…`; a new
   `docker/ci/dev/mcp.env` in the FA repo with `FA_DEV_MODULES="sgw_sales graphql mcp"`
   and its own port.
@@ -175,6 +177,15 @@ final class Executor
 
     public function revokeToken(int $company, string $jti): bool;
 
+    /**
+     * Connection details for a company's database, as config_db.php gives them,
+     * for a module that keeps its own tables there through its own PDO (mcp's
+     * OAuth store, §9). Never graphql's CompanyPdo: that one is bound to the
+     * request's single company.
+     * @return array{dsn: string, user: string, password: string, prefix: string}
+     */
+    public function database(int $company): array;
+
     /** True when the row is missing or revoked. Expiry is ignored *imscp (b)*. */
     public function tokenIsRevoked(int $company, string $jti): bool;
 }
@@ -187,9 +198,8 @@ final class Executor
   Absent means `write`, so every existing token keeps working. A `read` token
   running a mutation gets `FORBIDDEN` "This token is read-only" on the HTTP path
   and in `Executor`. `me` gains a `scope: String!` field. `bin/fa-token issue`
-  gains `--read-only`, and `list` shows the scope. `graphql_machine_token` gains
-  `scope varchar(8) NOT NULL DEFAULT 'write'` (`update_1.2.sql`); its `label`
-  holds the connection name.
+  gains `--read-only`. The scope lives only in the signed token, so
+  `graphql_machine_token` is unchanged; its `label` holds the connection name.
 - **Tests in graphql:** Executor parity with HTTP (same envelope for the same
   document), both auth reasons, `read` refused on a mutation (HTTP and Executor),
   `me { scope }`, `issueToken`/`revokeToken`/`tokenIsRevoked`, `authenticate`
@@ -269,20 +279,18 @@ is the intended credential. No OAuth, no refresh.
    in *<company name>*". Choice: **Read-only** (`read`) or **Read and change**
    (`write`), preselected from the requested `scope`. CSRF token,
    `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`.
-   - Allow: one-time code `<company>.<random>` (60 s, stored as SHA-256, bound
-     to client, redirect URI, PKCE challenge, login, scope, resource); redirect
-     with `code`, `state`, `iss` (RFC 9207).
+   - Allow: one-time code (256-bit random, 60 s, stored as SHA-256, bound to
+     client, redirect URI, PKCE challenge, company, login, scope, resource);
+     redirect with `code`, `state`, `iss` (RFC 9207).
    - Deny: redirect with `error=access_denied`.
-8. **`POST /oauth/token`, `authorization_code`:** the code's company prefix
-   selects the company's tables; code unused and unexpired, client and redirect
+8. **`POST /oauth/token`, `authorization_code`:** code unused and unexpired, client and redirect
    URI match, PKCE S256 verifier, `resource` (if given) equals the MCP resource
    ignoring a trailing slash (else `invalid_target`). The code is used up
    whether or not the exchange succeeds. Response:
    - `access_token` = `issueToken(company, login, scope, access_token_ttl, "Claude (MCP) – <client name>")`
    - `token_type: "Bearer"`, `expires_in`, `scope`
-   - `refresh_token` = `<company>.<256-bit random, base64url>`, stored as SHA-256,
-     lifetime `refresh_token_ttl`. The company prefix routes the refresh to the
-     right company's tables, as graphql's own refresh tokens do.
+   - `refresh_token`: 256-bit random, base64url, stored as SHA-256, lifetime
+     `refresh_token_ttl`; its row records the company.
 
 ### 5.4 Refresh and revocation
 
@@ -474,22 +482,30 @@ Both executing tools go through `Executor::execute`.
 With no `config_mcp.php`, the defaults apply and OAuth is off (no `base_url`):
 bearer-only use works out of the box.
 
-## 9. Data model (`sql/update_1.0.sql`, per company, utf8mb4 *imscp (f)*)
+## 9. Data model (`sql/update_1.0.sql`, utf8mb4 *imscp (f)*)
+
+All four tables live in **company 0's database** (with company 0's table
+prefix), whichever company a connection is for. Clients are registered before a
+company is known, and the token endpoint must read the client, the code and the
+refresh row while graphql has the user's company open: graphql allows one
+company per request, so mcp keeps its OAuth state out of graphql's way, on its
+own PDO built from `Executor::database(0)`. Rows that belong to a company say
+which in a `company` column.
 
 - `0_mcp_oauth_client`: `client_id` (PK, varchar 255), `kind` (`dcr`|`cimd`),
   `client_name`, `redirect_uris` (JSON text), `created_at`, `last_used_at`,
   `fetched_at`, `source_ip`.
-- `0_mcp_oauth_code`: `code_hash` (PK, char 64), `client_id`, `login`,
-  `redirect_uri`, `code_challenge`, `scope`, `resource`, `expires_at`, `used_at`.
+- `0_mcp_oauth_code`: `code_hash` (PK, char 64), `client_id`, `company`,
+  `login`, `redirect_uri`, `code_challenge`, `scope`, `resource`, `expires_at`,
+  `used_at`.
 - `0_mcp_oauth_refresh`: `id` (PK), `token_hash` (unique, char 64), `family`
-  (char 32), `client_id`, `login`, `scope`, `graphql_jti`, `expires_at`,
-  `rotated_at`, `revoked_at`, `created_at`.
+  (char 32), `client_id`, `company`, `login`, `scope`, `graphql_jti`,
+  `expires_at`, `rotated_at`, `revoked_at`, `created_at`.
 - `0_mcp_oauth_rate`: `bucket` (PK: kind + source IP + hour), `count`.
 
-Clients are registered before a company is known (DCR, CIMD), so client and
-rate rows live in **company 0**'s tables; codes and refresh rows live in the
-chosen company's tables. `activate_extension` creates all four tables in the
-company being activated and, if missing, in company 0 too.
+`hooks_mcp::activate_extension($company)` checks graphql for `$company`, then
+runs `update_databases(0, …)`, so the tables exist in company 0 whichever
+company mcp is activated for.
 
 ## 10. Errors
 
@@ -523,8 +539,8 @@ and in development through `docker/ci/plugin-dev.sh --env mcp`.
   - OAuth against `InMemoryStore` and a fake `AccountGateway`: PKCE, code single
     use and expiry, redirect rules, refresh rotation and reuse detection, the
     revoked-token refresh path, `invalid_target`, CIMD SSRF guard (private,
-    loopback, IPv6; redirects refused), DCR rate limit, company routing by the
-    code and refresh prefixes.
+    loopback, IPv6; redirects refused), DCR rate limit, the company carried on
+    code and refresh rows.
 - **integration** (FA in-process, demo company, graphql + sgw_sales active):
   the catalog generated from the real schema; every generated document
   validates against it; `ExecutorGraphQlGateway` runs `customer_list`.
