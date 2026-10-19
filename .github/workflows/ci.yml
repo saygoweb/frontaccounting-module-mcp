@@ -33,12 +33,11 @@ jobs:
       test: sh tools/ci.sh
 
   coverage:
-    uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@ci/plugin-coverage
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@master-cp
     with:
       fa: cp
       php: '8.3'
       dataset: demo
-      fa-ref: ci/plugin-coverage
       setup: composer install --no-interaction --no-progress
       with: |
         sgw_sales=https://github.com/saygoweb/frontaccounting-module-sgw_sales.git@master

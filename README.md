@@ -175,10 +175,9 @@ suites. `sh tools/coverage.sh` in the same way writes `build/coverage.xml`
 (unit and integration suites only; the http suite runs in Apache).
 
 CI (`.github/workflows/ci.yml`) runs that on FrontAccounting cp and upstream
-with PHP 7.4 and 8.3, and uploads coverage to Codecov from one cell. Until the
-shared coverage input is merged into FrontAccounting, the coverage job points
-at FrontAccounting's `ci/plugin-coverage` branch; switch it to `master-cp`
-then. The GraphQL module (Executor 1.0) is taken from its `main`.
+with PHP 7.4 and 8.3, with the GraphQL module (Executor 1.0) from its `main`,
+and uploads coverage to Codecov from one cell through the reusable workflow's
+`coverage` input.
 
 ## License
 
