@@ -34,6 +34,31 @@ class GeneratedToolTest extends TestCase
         $this->assertSame(['query' => ['limit' => 5]], $gql->calls[0]['variables']);
     }
 
+    public function testAnExplicitNullForANullableArgumentIsPassedThrough(): void
+    {
+        $gql = new FakeGraphQlGateway(['data' => ['invoiceEmail' => true]]);
+        $this->tool('invoice_email')->call(['id' => ['7'], 'fields' => null], $gql);
+        $this->assertSame(
+            'mutation ($id: [ID!]!, $fields: String) { invoiceEmail(id: $id, fields: $fields) }',
+            $gql->calls[0]['document']
+        );
+        $this->assertSame(['id' => ['7'], 'fields' => null], $gql->calls[0]['variables']);
+    }
+
+    public function testNullsInsideTheMangoQueryAreKeptAndTheLimitStillApplies(): void
+    {
+        $gql = new FakeGraphQlGateway(['data' => ['customerList' => []]]);
+        $this->tool('customer_list')->call(['query' => ['selector' => null, 'limit' => null, 'skip' => null]], $gql);
+        $this->assertSame(
+            ['query' => ['selector' => null, 'limit' => 50, 'skip' => null]],
+            $gql->calls[0]['variables']
+        );
+
+        // A null query is no query: the default limit is still injected.
+        $this->tool('customer_list')->call(['query' => null], $gql);
+        $this->assertSame(['query' => ['limit' => 50]], $gql->calls[1]['variables']);
+    }
+
     public function testDataIsTheRootFieldsValue(): void
     {
         $gql = new FakeGraphQlGateway(['data' => ['customerList' => [['id' => '1', 'name' => 'A']]]]);

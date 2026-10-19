@@ -69,14 +69,17 @@ class SchemaToolFactoryTest extends TestCase
         );
         $this->assertNotContains('fields', $tools['customer_list']->inputSchema()['required'] ?? []);
         // The real argument wins and keeps its own schema.
-        $this->assertSame(['type' => 'string'], $tools['invoice_email']->inputSchema()['properties']['fields']);
+        $this->assertSame(
+            ['type' => ['string', 'null']],
+            $tools['invoice_email']->inputSchema()['properties']['fields']
+        );
     }
 
     public function testARealFieldsArgumentWinsOnAnObjectReturn(): void
     {
         $schema = BuildSchema::build('type T { id: ID } type Query { thing(fields: Int): T }');
         $tool = (new SchemaToolFactory(50))->fromSchema($schema)[0];
-        $this->assertSame(['type' => 'integer'], $tool->inputSchema()['properties']['fields']);
+        $this->assertSame(['type' => ['integer', 'null']], $tool->inputSchema()['properties']['fields']);
     }
 
     public function testDescriptions(): void

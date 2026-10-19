@@ -19,6 +19,11 @@ use GraphQL\Type\Definition\Type;
  * `enum`, an input object a closed object (nesting capped at MAX_DEPTH), a list
  * an array; a non-null without a default is `required`. Descriptions of
  * arguments, fields and types are carried over.
+ *
+ * A nullable argument, input field or list item also accepts null, as GraphQL
+ * does: its `type` gains "null" (and an enum's `enum` gains null), so an
+ * explicit null from a model passes validation and reaches GraphQL as given.
+ * A non-null one stays strict.
  */
 final class JsonSchemaMapper
 {
@@ -58,8 +63,28 @@ final class JsonSchemaMapper
     private static function forType(Type $type, int $depth): array
     {
         if ($type instanceof NonNull) {
-            return self::forType($type->getWrappedType(), $depth);
+            return self::forNonNull($type->getWrappedType(), $depth);
         }
+        return self::nullable(self::forNonNull($type, $depth));
+    }
+
+    /** $schema accepting null too. */
+    private static function nullable(array $schema): array
+    {
+        if (isset($schema['type'])) {
+            $types = (array) $schema['type'];
+            $types[] = 'null';
+            $schema['type'] = $types;
+        }
+        if (isset($schema['enum'])) {
+            $schema['enum'][] = null;
+        }
+        return $schema;
+    }
+
+    /** The schema of $type's values, null not among them. */
+    private static function forNonNull(Type $type, int $depth): array
+    {
         if ($type instanceof ListOfType) {
             return ['type' => 'array', 'items' => self::forType($type->getWrappedType(), $depth)];
         }
@@ -105,7 +130,8 @@ final class JsonSchemaMapper
         foreach ($type->getFields() as $name => $field) {
             if ($type->name === self::MANGO && $name === 'selector') {
                 // GeneratedTool JSON-encodes an object selector, so a model may pass either.
-                $properties[$name] = ['type' => ['string', 'object'], 'description' => self::SELECTOR_DESCRIPTION];
+                $selector = ['type' => ['string', 'object'], 'description' => self::SELECTOR_DESCRIPTION];
+                $properties[$name] = $field->getType() instanceof NonNull ? $selector : self::nullable($selector);
             } else {
                 $schema = self::forType($field->getType(), $depth);
                 $properties[$name] = self::withDescription($schema, $field->description);

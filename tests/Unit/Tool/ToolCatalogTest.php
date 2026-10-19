@@ -102,7 +102,7 @@ class ToolCatalogTest extends TestCase
             $this->fail('expected RpcError');
         } catch (RpcError $e) {
             $this->assertSame(RpcError::INVALID_PARAMS, $e->rpcCode());
-            $this->assertSame('Invalid arguments: /query/limit: expected integer', $e->getMessage());
+            $this->assertSame('Invalid arguments: /query/limit: expected integer or null', $e->getMessage());
         }
         // GraphQL is never called with bad arguments.
         $this->assertSame([], $gql->callsContaining('customerList'));
