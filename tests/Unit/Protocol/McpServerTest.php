@@ -185,6 +185,16 @@ class McpServerTest extends TestCase
         $this->assertStringContainsString('"tools":{}', Json::encode($out->body()));
     }
 
+    public function testLegacyDiscoverAlsoCarriesServerInfo(): void
+    {
+        $out = $this->legacy(['jsonrpc' => '2.0', 'id' => 'b', 'method' => 'server/discover', 'params' => []]);
+        $this->assertSame(200, $out->status());
+        $result = $out->body()['result'];
+        $this->assertSame('complete', $result['resultType']);
+        $this->assertSame(Versions::SUPPORTED, $result['supportedVersions']);
+        $this->assertSame(self::SERVER_INFO, $result['_meta'][Versions::META_SERVER_INFO]);
+    }
+
     public function testModernToolsListHasCacheFieldsAndDeterministicOrder(): void
     {
         $out = $this->modern(['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/list', 'params' => []]);

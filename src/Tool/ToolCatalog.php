@@ -76,7 +76,11 @@ final class ToolCatalog implements ToolProvider
 
     public function callTool(string $name, array $arguments): array
     {
-        $tool = $this->visibleTools()[$name] ?? null;
+        $tool = $this->allTools()[$name] ?? null;
+        // A read-only tool runs on any connection, so only a write tool needs the scope.
+        if ($tool !== null && $tool->requiresWrite() && $this->isReadConnection()) {
+            $tool = null;
+        }
         if ($tool === null) {
             throw new RpcError(RpcError::INVALID_PARAMS, 'Unknown tool: ' . $name);
         }
@@ -99,26 +103,56 @@ final class ToolCatalog implements ToolProvider
      */
     private function visibleTools(): array
     {
-        try {
-            if ($this->tools === null) {
+        $tools = $this->allTools();
+        if (!$this->isReadConnection()) {
+            return $tools;
+        }
+        return array_filter($tools, function (Tool $tool): bool {
+            return !$tool->requiresWrite();
+        });
+    }
+
+    /**
+     * Every tool, whatever the scope. When two tools map to one name the first
+     * in catalog order (generated before the escape hatch) is kept, and the
+     * later one is skipped and logged.
+     *
+     * @return array<string, Tool> name => tool, in catalog order
+     * @throws HttpStatusException for an AuthFailure
+     */
+    private function allTools(): array
+    {
+        if ($this->tools === null) {
+            try {
                 $tools = $this->factory->fromSchema($this->gql->schema());
-                if ($this->escapeHatch) {
-                    array_push($tools, new GraphQlSchema(), new GraphQlQuery(), new GraphQlMutate());
-                }
-                $this->tools = [];
-                foreach ($tools as $tool) {
-                    $this->tools[$tool->name()] = $tool;
-                }
+            } catch (AuthFailure $e) {
+                throw $this->httpStatus($e);
             }
-            if ($this->scope->scope() !== ScopeProbe::READ) {
-                return $this->tools;
+            if ($this->escapeHatch) {
+                array_push($tools, new GraphQlSchema(), new GraphQlQuery(), new GraphQlMutate());
             }
+            $this->tools = [];
+            foreach ($tools as $tool) {
+                $name = $tool->name();
+                if (isset($this->tools[$name])) {
+                    error_log('mcp: tool name collision on ' . $name . '; keeping the first, skipping '
+                        . get_class($tool));
+                    continue;
+                }
+                $this->tools[$name] = $tool;
+            }
+        }
+        return $this->tools;
+    }
+
+    /** @throws HttpStatusException for an AuthFailure */
+    private function isReadConnection(): bool
+    {
+        try {
+            return $this->scope->scope() === ScopeProbe::READ;
         } catch (AuthFailure $e) {
             throw $this->httpStatus($e);
         }
-        return array_filter($this->tools, function (Tool $tool): bool {
-            return !$tool->requiresWrite();
-        });
     }
 
     private function httpStatus(AuthFailure $e): HttpStatusException

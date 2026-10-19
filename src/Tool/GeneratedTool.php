@@ -4,6 +4,8 @@ namespace FA\Mcp\Tool;
 
 use FA\Mcp\Gateway\GraphQlGateway;
 use GraphQL\Error\SyntaxError;
+use GraphQL\Language\AST\FieldNode;
+use GraphQL\Language\AST\OperationDefinitionNode;
 use GraphQL\Language\Parser;
 use GraphQL\Type\Definition\FieldDefinition;
 
@@ -175,8 +177,10 @@ final class GeneratedTool implements Tool
 
     /**
      * Why a document with `fields` spliced in is refused, or null: a selection
-     * set must not close the operation and open another (a mutation riding in
-     * on a read-only tool), so the document must still be one operation.
+     * set must not close the field and add another root field (a mutation
+     * riding in on a read-only tool, or a second mutation), so the document
+     * must still be one operation whose root selection is this field alone,
+     * unaliased, with no fragment spread or inline fragment beside it.
      */
     private function checkSpliced(string $document): ?string
     {
@@ -185,8 +189,21 @@ final class GeneratedTool implements Tool
         } catch (SyntaxError $e) {
             return 'GraphQL syntax error: ' . $e->getMessage();
         }
+        $refusal = 'must be a selection set of `' . $this->field->name . '` only';
         if (count($definitions) !== 1) {
-            return 'must be a selection set of `' . $this->field->name . '` only';
+            return $refusal;
+        }
+        $operation = $definitions[0];
+        if (!$operation instanceof OperationDefinitionNode || $operation->operation !== $this->operation) {
+            return $refusal;
+        }
+        $selections = $operation->selectionSet->selections;
+        if (count($selections) !== 1) {
+            return $refusal;
+        }
+        $root = $selections[0];
+        if (!$root instanceof FieldNode || $root->alias !== null || $root->name->value !== $this->field->name) {
+            return $refusal;
         }
         return null;
     }

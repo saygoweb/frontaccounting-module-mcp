@@ -97,7 +97,10 @@ final class McpServer implements ProtocolServer
             return self::failure(200, $id, new RpcError(RpcError::INTERNAL, $message));
         }
 
-        return new HttpOutcome(200, JsonRpc::result($id, $modern ? $this->decorate($result) : $result));
+        // server/discover is a modern method, so its result has the modern
+        // shape (serverInfo in _meta) whichever era's handshake carried it.
+        $decorate = $modern || $request->method() === 'server/discover';
+        return new HttpOutcome(200, JsonRpc::result($id, $decorate ? $this->decorate($result) : $result));
     }
 
     /**

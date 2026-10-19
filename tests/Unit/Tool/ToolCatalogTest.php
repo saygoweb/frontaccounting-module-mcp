@@ -9,6 +9,7 @@ use FA\Mcp\Tests\Support\FakeGraphQlGateway;
 use FA\Mcp\Tool\SchemaToolFactory;
 use FA\Mcp\Tool\ScopeProbe;
 use FA\Mcp\Tool\ToolCatalog;
+use GraphQL\Utils\BuildSchema;
 use PHPUnit\Framework\TestCase;
 
 class ToolCatalogTest extends TestCase
@@ -128,11 +129,92 @@ class ToolCatalogTest extends TestCase
         $this->assertSame(1, $gql->schemaCalls);
     }
 
-    public function testAMissingScopeFieldMeansWrite(): void
+    public function testASchemaWithoutViewerScopeMeansWrite(): void
     {
-        $this->assertSame('write', (new ScopeProbe(self::gateway(null)))->scope());
-        $errors = (new FakeGraphQlGateway())->on('me { scope }', ['errors' => [['message' => 'Cannot query field']]]);
-        $this->assertSame('write', (new ScopeProbe($errors))->scope());
+        $schema = BuildSchema::build('type Viewer { login: String! } type Query { me: Viewer! }');
+        $gql = new FakeGraphQlGateway(['data' => []], $schema);
+        $this->assertSame('write', (new ScopeProbe($gql))->scope());
+        $this->assertSame([], $gql->calls);
+    }
+
+    public function testASchemaWithoutMeMeansWrite(): void
+    {
+        $gql = new FakeGraphQlGateway(['data' => []], BuildSchema::build('type Query { apiVersion: String! }'));
+        $this->assertSame('write', (new ScopeProbe($gql))->scope());
+        $this->assertSame([], $gql->calls);
+    }
+
+    /** @dataProvider nonAnswers */
+    public function testAnythingButAnExplicitWriteMeansRead(array $envelope): void
+    {
+        $gql = (new FakeGraphQlGateway())->on('me { scope }', $envelope);
+        $this->assertSame('read', (new ScopeProbe($gql))->scope());
+    }
+
+    public function nonAnswers(): array
+    {
+        return [
+            'graphql error' => [['errors' => [['message' => 'Internal server error']]]],
+            'no data' => [[]],
+            'null me' => [['data' => ['me' => null]]],
+            'missing scope' => [['data' => ['me' => ['login' => 'admin']]]],
+            'empty scope' => [['data' => ['me' => ['scope' => '']]]],
+            'unknown scope' => [['data' => ['me' => ['scope' => 'admin']]]],
+            'non-string scope' => [['data' => ['me' => ['scope' => ['write']]]]],
+            'read' => [['data' => ['me' => ['scope' => 'read']]]],
+        ];
+    }
+
+    public function testAnExplicitWriteMeansWrite(): void
+    {
+        $this->assertSame('write', (new ScopeProbe(self::gateway('write')))->scope());
+    }
+
+    public function testCallingAReadOnlyToolDoesNotProbeTheScope(): void
+    {
+        $gql = self::gateway('write');
+        self::catalog($gql)->callTool('customer_list', []);
+        $this->assertCount(1, $gql->calls);
+        $this->assertSame([], $gql->callsContaining('me { scope }'));
+    }
+
+    public function testCallingAWriteToolProbesTheScope(): void
+    {
+        $gql = self::gateway('write')->on('customerDelete', ['data' => ['customerDelete' => []]]);
+        self::catalog($gql)->callTool('customer_delete', ['id' => ['1']]);
+        $this->assertCount(1, $gql->callsContaining('me { scope }'));
+        $this->assertCount(1, $gql->callsContaining('customerDelete'));
+    }
+
+    public function testAGeneratedToolWinsANameCollisionWithTheEscapeHatch(): void
+    {
+        $sdl = (string)file_get_contents(dirname(__DIR__, 2) . '/data/schema.graphql');
+        $sdl = str_replace('type Query {', "type Query {\n  graphqlQuery: String!", $sdl);
+        $gql = new FakeGraphQlGateway(['data' => ['graphqlQuery' => 'x']], BuildSchema::build($sdl));
+        $gql->on('me { scope }', ['data' => ['me' => ['scope' => 'write']]]);
+
+        $log = (string)tempnam(sys_get_temp_dir(), 'mcplog');
+        $previous = ini_set('error_log', $log);
+        try {
+            $catalog = self::catalog($gql);
+            $names = self::names($catalog->listTools());
+            $catalog->listTools();
+            $result = $catalog->callTool('graphql_query', []);
+        } finally {
+            ini_set('error_log', (string)$previous);
+        }
+        $logged = (string)file_get_contents($log);
+        unlink($log);
+
+        $this->assertSame(1, array_count_values($names)['graphql_query']);
+        $this->assertSame(
+            ['graphql_schema', 'graphql_mutate'],
+            array_values(array_intersect($names, ['graphql_schema', 'graphql_mutate']))
+        );
+        // The generated query tool ran, not the escape hatch (which would need a `query` argument).
+        $this->assertFalse($result['isError']);
+        $this->assertCount(1, $gql->callsContaining('{ graphqlQuery }'));
+        $this->assertSame(1, substr_count($logged, 'graphql_query'));
     }
 
     public function testScopeProbeCaches(): void

@@ -116,6 +116,43 @@ class GeneratedToolTest extends TestCase
         $this->assertSame([], $gql->calls);
     }
 
+    public function testFieldsCannotAddARootMutation(): void
+    {
+        $gql = new FakeGraphQlGateway(['data' => ['customerUpdate' => []]]);
+        $mcp = $this->tool('customer_update')->call(
+            ['input' => [['id' => '1', 'name' => 'N']], 'fields' => 'id } customerDelete(id: ["1"]) { id'],
+            $gql
+        )->toMcp();
+        $this->assertTrue($mcp['isError']);
+        $this->assertStringStartsWith('fields: ', $mcp['content'][0]['text']);
+        $this->assertSame([], $gql->calls);
+    }
+
+    public function testFieldsCannotAddARootQuery(): void
+    {
+        $gql = new FakeGraphQlGateway(['data' => ['customerList' => []]]);
+        $mcp = $this->tool('customer_list')->call(['fields' => 'id } me { login'], $gql)->toMcp();
+        $this->assertTrue($mcp['isError']);
+        $this->assertStringStartsWith('fields: ', $mcp['content'][0]['text']);
+        $this->assertSame([], $gql->calls);
+    }
+
+    public function testFieldsCannotAliasTheRootField(): void
+    {
+        $gql = new FakeGraphQlGateway(['data' => ['customerList' => []]]);
+        $mcp = $this->tool('customer_list')->call(['fields' => 'id } other: customerList { id'], $gql)->toMcp();
+        $this->assertTrue($mcp['isError']);
+        $this->assertSame([], $gql->calls);
+    }
+
+    public function testFieldsCannotSpreadAFragmentAtTheRoot(): void
+    {
+        $gql = new FakeGraphQlGateway(['data' => ['customerList' => []]]);
+        $mcp = $this->tool('customer_list')->call(['fields' => 'id } ... on Query { me { login }'], $gql)->toMcp();
+        $this->assertTrue($mcp['isError']);
+        $this->assertSame([], $gql->calls);
+    }
+
     public function testFieldsSyntaxErrorIsAToolError(): void
     {
         $gql = new FakeGraphQlGateway(['data' => ['customerList' => []]]);
