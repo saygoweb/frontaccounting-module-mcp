@@ -6,9 +6,9 @@
   - `saygoweb/frontaccounting-module-mcp` (new, this repo, at `modules/mcp`)
   - `saygoweb/frontaccounting-module-graphql` (`modules/graphql`): a supported
     in-process `Executor` and a token scope claim, minor release
-  - `cambell-prince/frontaccounting` (`master-cp`): a dev environment file, and
-    Codecov upload in the reusable `plugin-test.yml` (§12) unless graphql's
-    coverage work already adds it
+  - `cambell-prince/frontaccounting` (`master-cp`): a dev environment file
+    (`docker/ci/dev/mcp.env`); optionally a shared Codecov input on the reusable
+    `plugin-test.yml` (§12)
 - **Prior art:** the i-MSCP MCP plugin (`/home/cambell/src/sgw/imscp-mcp`,
   branch `feature/mcp-server`, spec `docs/superpowers/specs/2026-10-19-imscp-mcp-design.md`).
   Its protocol layer is ported; its lessons are cited below as *imscp (x)*.
@@ -550,18 +550,29 @@ and in development through `docker/ci/plugin-dev.sh --env mcp`.
   `setup: composer install --no-interaction --no-progress`,
   `with:` graphql (`saygoweb/frontaccounting-module-graphql` at the release
   with Executor 1.0) and sgw_sales, `test: sh tools/ci.sh`.
-- **Coverage:** `tools/coverage.sh`, as graphql's: the in-process suites (unit,
-  integration) with xdebug loaded through an extra ini scan directory, writing
-  `build/coverage.xml` (Clover). The http suite runs in Apache and is not
-  measured. One matrix cell (fa `cp`, php `8.3`) runs it, and the Clover file is
-  uploaded to codecov.io with the organisation secret `CODECOV_TOKEN`
-  (`codecov/codecov-action`, `fail_ci_if_error: true`).
-- The upload uses the same mechanism as graphql's coverage work (in progress on
-  graphql's `ci/coverage` branch): a `coverage` input and `codecov-token` secret
-  on the reusable `plugin-test.yml`, or whatever that work settles on. If it has
-  not landed when mcp's CI is built, mcp's plan adds it to `plugin-test.yml`.
-- `codecov.yml`: project and patch statuses informational at first.
-- **README badges**, at the top:
+- **Coverage:** `tools/coverage.sh`, as graphql's: `tools/init.sh`, then the
+  in-process suites (`composer run test:coverage -- --testsuite unit,integration`)
+  with xdebug (installed but disabled in the CI image) loaded through an extra
+  `PHP_INI_SCAN_DIR` directory, which also reaches process-isolated tests;
+  `XDEBUG_MODE=coverage`, `COMPOSER_ALLOW_XDEBUG=1`, `COMPOSER_PROCESS_TIMEOUT=0`.
+  It writes `build/coverage.xml` (Clover); `phpunit.xml` includes `src/`. The
+  http suite runs in Apache and is not measured.
+- **Upload, graphql's mechanism:** `ci.yml` has a separate `coverage` job (one
+  cell: fa `cp`, php `8.3`, dataset demo, graphql and sgw_sales alongside) that
+  repeats the reusable workflow's steps (checkout the plugin and FA's
+  `docker/ci` sparsely, composer cache, pull the image, run
+  `fa-ci/docker/ci/plugin-test.sh … plugin -- "sh tools/coverage.sh"`); the
+  plugin checkout is bind-mounted, so `plugin/build/coverage.xml` lands on the
+  runner and `codecov/codecov-action@v5` uploads it with
+  `token: ${{ secrets.CODECOV_TOKEN }}`.
+- **Shared alternative:** with graphql and mcp both needing it, a `coverage`
+  input and `codecov-token` secret on FA's reusable `plugin-test.yml` would
+  replace both copies. The graphql coverage work is raising this with the user;
+  mcp uses it if it exists when mcp's CI is built, and graphql's separate-job
+  pattern otherwise.
+- `codecov.yml`: `fixes: ["/var/www/html/modules/mcp/::"]` (Clover paths are the
+  container's), project and patch statuses informational at first.
+- **README badges**, under the H1:
 
   ```markdown
   [![CI](https://github.com/saygoweb/frontaccounting-module-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/saygoweb/frontaccounting-module-mcp/actions/workflows/ci.yml)
@@ -572,7 +583,7 @@ and in development through `docker/ci/plugin-dev.sh --env mcp`.
 
 1. graphql: `Executor` 1.0, the `scp` claim and `me { scope }`,
    `fa-token --read-only`, tests; released as a minor version.
-2. FA: `docker/ci/dev/mcp.env`; Codecov in `plugin-test.yml` if not already there.
+2. FA: `docker/ci/dev/mcp.env` (and the shared Codecov input, if the user chooses it).
 3. mcp: protocol port, gateways, generated tools and escape hatch (bearer-only
    end to end), then OAuth, then CI, coverage, badges and docs.
 
