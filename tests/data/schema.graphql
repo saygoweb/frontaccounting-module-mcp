@@ -1,0 +1,101 @@
+# A small slice of the GraphQL module's schema (graphql's src/ApiSchema.php and
+# src/Type/**) for the tool layer's unit tests. Argument names and input shapes
+# follow the real API; where a field is simplified or added to pin a rule, a
+# comment says so.
+
+"""Mango query: selector is a JSON-encoded Mango selector string."""
+input MangoInput {
+  action: String
+  selector: String
+  limit: Int
+  skip: Int
+  sort: [String]
+}
+
+type Viewer {
+  login: String!
+  """The FrontAccounting security areas (SA_*) this user's role holds."""
+  areas: [String!]!
+  """What this token may do: 'read' (queries only) or 'write'."""
+  scope: String!
+}
+
+type Contact {
+  id: ID!
+  name: String
+  email: String
+}
+
+# Not in the real API (credit status is an ID there): pins the enum mapping.
+enum CreditStatus {
+  GOOD
+  HOLD
+}
+
+# Simplified: the real Customer has more scalars and a CustomerBalance object.
+type Customer {
+  id: ID!
+  name: String!
+  currency: String
+  creditStatus: CreditStatus
+  balance: Float
+  """The contacts linked to the customer itself (a branch has its own)."""
+  contacts: [Contact!]!
+}
+
+input CustomerCreateInput {
+  name: String!
+  ref: String!
+  currencyId: ID
+  salesTypeId: ID!
+  creditStatusId: ID!
+  paymentTermsId: ID!
+  creditLimit: Float
+  notes: String
+  inactive: Boolean
+  # Fixture only, for the enum mapping.
+  creditStatus: CreditStatus
+}
+
+input CustomerUpdateInput {
+  id: ID!
+  name: String
+  ref: String
+  currencyId: ID
+  creditStatusId: ID
+  creditLimit: Float
+  notes: String
+  inactive: Boolean
+}
+
+type AuthPayload {
+  accessToken: String!
+  expiresIn: Int!
+  refreshToken: String!
+}
+
+type Query {
+  """The version of the GraphQL module. Needs no token."""
+  apiVersion: String!
+  """The signed-in user."""
+  me: Viewer!
+  customerList(query: MangoInput): [Customer!]!
+  # sgw_sales' extension field; its real argument list is simplified.
+  recurringDueList(asOf: String!): [Customer!]!
+}
+
+type Mutation {
+  """Sign in as a FrontAccounting user. Needs no token."""
+  login(user: String!, password: String!, company: Int = 0): AuthPayload!
+  """Exchange a refresh token for a new pair. Needs no token."""
+  tokenRefresh(refreshToken: String!): AuthPayload!
+  """Revoke one of your refresh tokens, or all of them when none is given."""
+  tokenRevoke(refreshToken: String): Boolean!
+  customerCreate(input: [CustomerCreateInput!]!): [Customer!]!
+  customerUpdate(input: [CustomerUpdateInput!]!): [Customer!]!
+  customerDelete(id: [ID!]!): [Customer!]!
+  # The real field returns [InvoiceEmailResult!]! and has no `fields` argument:
+  # Boolean! pins the scalar-return rule, and `fields` the name-collision rule.
+  """Email invoices through FrontAccounting's invoice report, to each customer's invoice (else general) contact."""
+  invoiceEmail(id: [ID!]!, fields: String): Boolean!
+}
