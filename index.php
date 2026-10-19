@@ -18,6 +18,7 @@ use FA\GraphQL\Config as GraphQlConfig;
 use FA\Mcp\Config;
 use FA\Mcp\Http\OutputCapture;
 use FA\Mcp\Http\RequestContext;
+use FA\Mcp\Http\RootRewrite;
 use FA\Mcp\Runtime\GraphQlRequirement;
 use Psr\Http\Message\ResponseInterface;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -68,6 +69,7 @@ try {
     $container = (require __DIR__ . '/container.php')($config, $graphqlConfig, $context);
     // The module's directory, as the browser sees it: '/modules/mcp' in the stack.
     $basePath = rtrim(str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '/'))), '/');
+    $request = RootRewrite::apply($request, $basePath, $_SERVER['REDIRECT_URL'] ?? null);
     $app = (require __DIR__ . '/app.php')($container, $basePath);
 } catch (\Throwable $e) {
     error_log('mcp: ' . get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());

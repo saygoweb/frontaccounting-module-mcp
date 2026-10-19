@@ -15,6 +15,12 @@ trait McpClient
         return (string) (getenv('FA_MCP_TEST_USER') ?: 'test');
     }
 
+    /** The CI user's password (the image's test/test). */
+    private static function ciPassword(): string
+    {
+        return (string) (getenv('FA_MCP_TEST_PASSWORD') ?: 'test');
+    }
+
     private static function mcpUrl(): string
     {
         $url = getenv('FA_MCP_URL');
@@ -32,12 +38,29 @@ trait McpClient
      */
     private function http(string $method, string $path = '', array $headers = [], ?string $body = null): array
     {
+        return $this->httpUrl($method, self::mcpUrl() . $path, $headers, $body);
+    }
+
+    /**
+     * Any request to an absolute URL. Redirects are not followed. With
+     * $cookieJar (a file), cookies are kept across calls as a browser would.
+     *
+     * @param array<string, string> $headers name => value
+     * @return array{status: int, headers: array<string, string>, body: array|null, raw: string}
+     */
+    private function httpUrl(
+        string $method,
+        string $url,
+        array $headers = [],
+        ?string $body = null,
+        ?string $cookieJar = null
+    ): array {
         $lines = ['User-Agent: fa-mcp-tests'];
         foreach ($headers as $name => $value) {
             $lines[] = $name . ': ' . $value;
         }
         $received = [];
-        $curl = curl_init(self::mcpUrl() . $path);
+        $curl = curl_init($url);
         curl_setopt_array($curl, [
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_HTTPHEADER => $lines,
@@ -51,11 +74,15 @@ trait McpClient
                 return strlen($line);
             },
         ]);
+        if ($cookieJar !== null) {
+            curl_setopt($curl, CURLOPT_COOKIEFILE, $cookieJar);
+            curl_setopt($curl, CURLOPT_COOKIEJAR, $cookieJar);
+        }
         if ($body !== null) {
             curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
         }
         $raw = curl_exec($curl);
-        $this->assertIsString($raw, 'no response from ' . self::mcpUrl() . $path . ': ' . curl_error($curl));
+        $this->assertIsString($raw, 'no response from ' . $url . ': ' . curl_error($curl));
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
         curl_close($curl);
         $decoded = json_decode($raw, true);

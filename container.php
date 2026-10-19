@@ -19,7 +19,21 @@ use FA\Mcp\Gateway\GraphQlGateway;
 use FA\Mcp\Http\ErrorMiddleware;
 use FA\Mcp\Http\McpAction;
 use FA\Mcp\Http\RequestContext;
+use FA\Mcp\OAuth\AuthorizationServer;
+use FA\Mcp\OAuth\CimdFetcher;
+use FA\Mcp\OAuth\ClientRegistry;
+use FA\Mcp\OAuth\Clock;
+use FA\Mcp\OAuth\CurlHttpFetcher;
+use FA\Mcp\OAuth\Http\AuthorizeAction;
+use FA\Mcp\OAuth\Http\McpSession;
+use FA\Mcp\OAuth\Http\MetadataAction;
+use FA\Mcp\OAuth\Http\Pages;
+use FA\Mcp\OAuth\Http\RegisterAction;
+use FA\Mcp\OAuth\Http\TokenAction;
 use FA\Mcp\OAuth\Metadata;
+use FA\Mcp\OAuth\PdoStore;
+use FA\Mcp\OAuth\Store;
+use FA\Mcp\OAuth\SystemClock;
 use FA\Mcp\Protocol\Instructions;
 use FA\Mcp\Protocol\McpServer;
 use FA\Mcp\Protocol\ProtocolServer;
@@ -57,6 +71,64 @@ return function (Config $config, GraphQlConfig $graphqlConfig, RequestContext $r
         },
         Metadata::class => static function () use ($config): Metadata {
             return new Metadata($config->baseUrl, $config->allowDcr, $config->allowCimd);
+        },
+        // OAuth (spec §5.3, §9): its tables are in company 0's database, on a
+        // PDO of mcp's own, opened only when an OAuth route needs the store.
+        PdoStore::class => static function (ContainerInterface $c): PdoStore {
+            $db = $c->get(Executor::class)->database(0);
+            $options = [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION];
+            $pdo = new \PDO($db['dsn'], $db['user'], $db['password'], $options);
+            return new PdoStore($pdo, $db['prefix']);
+        },
+        Store::class => DI\get(PdoStore::class),
+        Clock::class => static function (): Clock {
+            return new SystemClock();
+        },
+        ClientRegistry::class => static function (ContainerInterface $c) use ($config): ClientRegistry {
+            return new ClientRegistry(
+                $c->get(Store::class),
+                new CimdFetcher(new CurlHttpFetcher()),
+                $config,
+                $c->get(Clock::class)
+            );
+        },
+        AuthorizationServer::class => static function (ContainerInterface $c) use ($config): AuthorizationServer {
+            return new AuthorizationServer(
+                $c->get(Store::class),
+                $c->get(ClientRegistry::class),
+                $c->get(AccountGateway::class),
+                $c->get(Metadata::class),
+                $c->get(Clock::class),
+                $config
+            );
+        },
+        MetadataAction::class => static function (ContainerInterface $c) use ($config, $graphqlConfig): MetadataAction {
+            return new MetadataAction($config, $c->get(Metadata::class), $graphqlConfig->trustProxy);
+        },
+        AuthorizeAction::class => static function (ContainerInterface $c) use (
+            $config,
+            $graphqlConfig
+        ): AuthorizeAction {
+            return new AuthorizeAction(
+                $config,
+                $c->get(AuthorizationServer::class),
+                $c->get(AccountGateway::class),
+                new Pages(),
+                McpSession::key($graphqlConfig->secret),
+                $c->get(Clock::class),
+                $graphqlConfig->trustProxy
+            );
+        },
+        TokenAction::class => static function (ContainerInterface $c) use ($config, $graphqlConfig): TokenAction {
+            return new TokenAction($config, $c->get(AuthorizationServer::class), $graphqlConfig->trustProxy);
+        },
+        RegisterAction::class => static function (ContainerInterface $c) use ($config, $graphqlConfig): RegisterAction {
+            return new RegisterAction(
+                $config,
+                $c->get(ClientRegistry::class),
+                $c->get(Clock::class),
+                $graphqlConfig->trustProxy
+            );
         },
         McpAction::class => static function (ContainerInterface $c) use ($config, $graphqlConfig): McpAction {
             return new McpAction(

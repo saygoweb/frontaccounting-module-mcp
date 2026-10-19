@@ -19,6 +19,15 @@ final class FakeAccountGateway implements AccountGateway
     /** @var array<int, array<string, array{password: string, active: bool, apiAccess: bool}>> [company][login] */
     public array $users = [];
 
+    /** @var \Throwable|null thrown by companies() when set */
+    public ?\Throwable $companiesFailure = null;
+
+    /** @var int[] companies authenticate() cannot open: it throws AuthFailure UNAUTHENTICATED */
+    public array $unavailable = [];
+
+    /** @var array[] each ['company' => int, 'login' => string], authenticate() calls in order */
+    public array $authentications = [];
+
     /** @var array<string, array{company: int, login: string}> jti => owner, every token ever issued */
     private array $owner = [];
 
@@ -95,16 +104,34 @@ final class FakeAccountGateway implements AccountGateway
 
     public function companies(): array
     {
+        if ($this->companiesFailure !== null) {
+            throw $this->companiesFailure;
+        }
         return $this->companies;
     }
 
+    /**
+     * As FrontAccounting does: the login matches ignoring case, and the
+     * stored spelling is returned ('' unless OK, as graphql's Executor).
+     */
     public function authenticate(int $company, string $login, string $password): array
     {
-        $user = $this->users[$company][$login] ?? null;
-        if ($user === null || !$user['active'] || $user['password'] !== $password) {
-            return ['status' => 'BAD_CREDENTIALS', 'login' => $login];
+        if (in_array($company, $this->unavailable, true)) {
+            throw new AuthFailure(AuthFailure::UNAUTHENTICATED, "Company $company cannot be opened.");
         }
-        return ['status' => $user['apiAccess'] ? 'OK' : 'NO_API_ACCESS', 'login' => $login];
+        $this->authentications[] = ['company' => $company, 'login' => $login];
+        foreach ($this->users[$company] ?? [] as $stored => $user) {
+            if (strcasecmp((string) $stored, $login) !== 0) {
+                continue;
+            }
+            if (!$user['active'] || $user['password'] !== $password) {
+                break;
+            }
+            return $user['apiAccess']
+                ? ['status' => 'OK', 'login' => (string) $stored]
+                : ['status' => 'NO_API_ACCESS', 'login' => ''];
+        }
+        return ['status' => 'BAD_CREDENTIALS', 'login' => ''];
     }
 
     public function issueToken(int $company, string $login, string $scope, int $ttlSeconds, string $label): array
