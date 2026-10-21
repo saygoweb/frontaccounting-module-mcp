@@ -117,6 +117,29 @@ class ToolCatalogTest extends TestCase
         $this->assertCount(1, $gql->callsContaining('customerList'));
     }
 
+    public function testListToolsNameTheQueryableFieldsGraphqlReportsProbedOnce(): void
+    {
+        $probe = '{ customerList(query: {sort: ["?"]';
+        $gql = self::gateway()->on($probe, ['data' => null, 'errors' => [[
+            'message' => "Argument 'query.sort' item '?' names an unknown field '?'. The sortable fields are: name, id",
+            'path' => ['customerList'],
+            'extensions' => ['code' => 'BAD_INPUT'],
+        ]]]);
+        $catalog = self::catalog($gql);
+        $catalog->callTool('customer_list', []);
+        $this->assertSame([], $gql->callsContaining($probe), 'a call needs no descriptions');
+
+        $descriptions = array_column($catalog->listTools(), 'description', 'name');
+        $catalog->listTools();
+        $this->assertCount(1, $gql->callsContaining($probe));
+        $this->assertSame([], $gql->callsContaining('{ recurringDueList('), 'not a Mango list');
+        $this->assertStringContainsString(
+            "\n\nFields for `query.selector` and `query.sort`: id, name.\n\n",
+            $descriptions['customer_list']
+        );
+        $this->assertStringNotContainsString('query.sort', $descriptions['customer_create']);
+    }
+
     public function testScopeAndSchemaAreLoadedOncePerCatalog(): void
     {
         $gql = self::gateway();

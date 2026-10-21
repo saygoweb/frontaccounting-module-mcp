@@ -8,6 +8,9 @@ use GraphQL\Language\AST\FieldNode;
 use GraphQL\Language\AST\OperationDefinitionNode;
 use GraphQL\Language\Parser;
 use GraphQL\Type\Definition\FieldDefinition;
+use GraphQL\Type\Definition\InterfaceType;
+use GraphQL\Type\Definition\ObjectType;
+use GraphQL\Type\Definition\Type;
 
 /**
  * One root field of the GraphQL schema as a tool (spec §6.3). The arguments
@@ -27,6 +30,9 @@ final class GeneratedTool implements Tool
         . ' default is every scalar field and the scalars of each nested object; lists of nested objects (an'
         . ' invoice\'s `lines`, a customer\'s `contacts`) are left out unless selected here.';
 
+    /** Starts the description's list of the fields a list's `query` can filter and sort on. */
+    private const QUERYABLE = 'Fields for `query.selector` and `query.sort`: ';
+
     /** Starts the description's list of what the default selection leaves out. */
     private const ON_REQUEST = 'Not returned unless asked for in `fields`: ';
 
@@ -39,6 +45,8 @@ final class GeneratedTool implements Tool
     private ?int $listLimit;
     /** @var string[] */
     private array $onRequest;
+    /** @var string[] the fields `query` can filter and sort on, named in the description */
+    private array $queryable = [];
     /** Whether `fields` is ours (a selection set) rather than one of the field's arguments. */
     private bool $ownFields;
     private ?array $inputSchema = null;
@@ -64,6 +72,33 @@ final class GeneratedTool implements Tool
         $this->ownFields = $defaultSelection !== '' && $field->getArg('fields') === null;
     }
 
+    /** The root field's name when it is a list that takes a Mango `query`, else null. */
+    public function listField(): ?string
+    {
+        return $this->listLimit === null ? null : $this->field->name;
+    }
+
+    /**
+     * This tool with $names, the fields its `query` can filter and sort on
+     * (QueryableFields'), named in its description: in the row type's
+     * declared order, any the type does not declare after them.
+     *
+     * @param string[] $names
+     */
+    public function withQueryable(array $names): self
+    {
+        $type = Type::getNamedType($this->field->getType());
+        $declared = $type instanceof ObjectType || $type instanceof InterfaceType
+            ? array_keys($type->getFields())
+            : [];
+        $tool = clone $this;
+        $tool->queryable = array_values(array_unique(array_merge(
+            array_intersect($declared, $names),
+            array_diff($names, $declared)
+        )));
+        return $tool;
+    }
+
     /** `customerList` => `customer_list`. */
     public static function snakeCase(string $name): string
     {
@@ -81,12 +116,19 @@ final class GeneratedTool implements Tool
         return ucfirst(str_replace('_', ' ', $this->name()));
     }
 
-    /** The field's description (or a generic one), then what `fields` can add to the default selection. */
+    /**
+     * The field's description (or a generic one), then the fields a list's
+     * `query` can filter and sort on, then what `fields` can add to the
+     * default selection.
+     */
     public function description(): string
     {
         $description = $this->field->description !== null && $this->field->description !== ''
             ? $this->field->description
             : ucfirst($this->operation) . ' `' . $this->field->name . '` of the FrontAccounting GraphQL API.';
+        if ($this->queryable !== []) {
+            $description .= "\n\n" . self::QUERYABLE . implode(', ', $this->queryable) . '.';
+        }
         if ($this->ownFields && $this->onRequest !== []) {
             $description .= "\n\n" . self::ON_REQUEST . '`' . implode('`, `', $this->onRequest) . '`.';
         }

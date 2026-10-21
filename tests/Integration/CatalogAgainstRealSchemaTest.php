@@ -104,6 +104,65 @@ class CatalogAgainstRealSchemaTest extends TestCase
         $this->assertLessThanOrEqual(2, count($result['structuredContent']['data']));
     }
 
+    /**
+     * The fields a list tool's description names for query.selector and
+     * query.sort are the ones graphql accepts: those its BAD_INPUT message for
+     * an unknown sort field lists.
+     */
+    public function testEachListNamesTheFieldsGraphqlFiltersAndSortsOn(): void
+    {
+        $catalog = $this->catalog('read');
+        $checked = 0;
+        foreach ($catalog->listTools() as $tool) {
+            $properties = $tool['inputSchema']['properties'];
+            if (!is_array($properties) || !isset($properties['query']['properties']['sort'])) {
+                continue;
+            }
+            $line = '/Fields for `query.selector` and `query.sort`: ([^.]*)\./';
+            $this->assertSame(1, preg_match($line, $tool['description'], $named), $tool['description']);
+            $result = $catalog->callTool($tool['name'], ['query' => ['sort' => ['noSuchField'], 'limit' => 1]]);
+            $text = $result['content'][0]['text'];
+            $this->assertTrue($result['isError'], $tool['name'] . ': ' . $text);
+            $this->assertSame(1, preg_match('/^BAD_INPUT: .*The sortable fields are: (.*)$/m', $text, $sortable));
+            $this->assertSame(
+                self::sorted(explode(', ', $sortable[1])),
+                self::sorted(explode(', ', $named[1])),
+                $tool['name']
+            );
+            if ($tool['name'] === 'invoice_list') {
+                // Computed, so not in the schema-only guess this replaces: the scalars of the row type.
+                $this->assertNotContains('outstanding', explode(', ', $named[1]));
+                $this->assertContains('date', explode(', ', $named[1]));
+            }
+            $checked++;
+        }
+        $this->assertGreaterThan(15, $checked);
+    }
+
+    public function testInvoiceListSortsNewestFirstAsTheSchemaSays(): void
+    {
+        $result = $this->catalog('read')->callTool('invoice_list', [
+            'query' => ['sort' => ['-date', '-id'], 'limit' => 10],
+            'fields' => 'id date',
+        ]);
+        $this->assertFalse($result['isError'], $result['content'][0]['text']);
+        $dates = array_column($result['structuredContent']['data'], 'date');
+        $this->assertGreaterThan(1, count($dates), 'the demo dataset has invoices');
+        $newestFirst = $dates;
+        rsort($newestFirst, SORT_STRING);
+        $this->assertSame($newestFirst, $dates);
+    }
+
+    /**
+     * @param string[] $names
+     * @return string[]
+     */
+    private static function sorted(array $names): array
+    {
+        sort($names, SORT_STRING);
+        return $names;
+    }
+
     public function testReadTokenListsNoMutationTools(): void
     {
         $write = array_column($this->catalog('write')->listTools(), 'annotations', 'name');

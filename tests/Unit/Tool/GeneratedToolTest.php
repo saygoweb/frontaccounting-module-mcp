@@ -275,6 +275,27 @@ class GeneratedToolTest extends TestCase
         $this->assertSame('FORBIDDEN: No.', $mcp['content'][0]['text']);
     }
 
+    public function testOnlyAMangoListHasAListField(): void
+    {
+        $this->assertSame('customerList', $this->tool('customer_list')->listField());
+        $this->assertNull($this->tool('recurring_due_list')->listField());
+        $this->assertNull($this->tool('customer_create')->listField());
+    }
+
+    public function testTheQueryableFieldsAreNamedInDeclaredOrderBeforeTheFieldsHint(): void
+    {
+        $tool = $this->tool('customer_list');
+        $named = $tool->withQueryable(['balance', 'id', 'notDeclared', 'name']);
+        $this->assertSame(
+            'Query `customerList` of the FrontAccounting GraphQL API.'
+            . "\n\nFields for `query.selector` and `query.sort`: id, name, balance, notDeclared."
+            . "\n\nNot returned unless asked for in `fields`: `contacts { id name email }`.",
+            $named->description()
+        );
+        $this->assertStringNotContainsString('query.sort', $tool->description(), 'withQueryable() leaves $tool be');
+        $this->assertSame($tool->description(), $tool->withQueryable([])->description());
+    }
+
     public function testAuthFailurePropagates(): void
     {
         $this->expectException(AuthFailure::class);

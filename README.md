@@ -68,6 +68,15 @@ claude mcp add --transport http fa https://fa.example.com/modules/mcp/ \
   caller's), the result's `note` says more may exist and gives the next page's
   `query.skip` (`skip` + `limit`). It gives no total: the GraphQL lists don't
   count their rows yet.
+- **`query.sort`** is graphql's: each item is a field, ascending, or `-field`
+  (or `field desc`) for descending, so `sort: ["-date"]` is newest first. Each
+  list tool's description names the fields its `selector` and `sort` take,
+  e.g. "Fields for `query.selector` and `query.sort`: id, transType, ...".
+  The schema doesn't say which fields those are (computed ones such as
+  an invoice's `outstanding` are refused), so on `tools/list` each list is
+  asked for a sort on a field none has, and the fields are read from the
+  `BAD_INPUT` error graphql answers with: one in-process request per list.
+  The same error, verbatim, is what a model gets for a field it guessed wrong.
 - **`fields`** (optional string) replaces the default selection set with a
   GraphQL selection body. By default every scalar and enum field is returned
   (lists of them too, such as an invoice's `deliveryIds`), plus the scalars of

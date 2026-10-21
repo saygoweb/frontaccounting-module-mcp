@@ -18,9 +18,10 @@ use GraphQL\Type\Schema;
  * hidden from a read connection.
  *
  * One instance lives for one HTTP request: the schema and the scope are each
- * fetched once, on first use. A hidden tool and a missing one are refused
- * alike. An AuthFailure from the gateway becomes the HttpStatusException the
- * transport answers with.
+ * fetched once, on first use, and so are the list tools' queryable fields
+ * (QueryableFields), on the first tools/list. A hidden tool and a missing one
+ * are refused alike. An AuthFailure from the gateway becomes the
+ * HttpStatusException the transport answers with.
  */
 final class ToolCatalog implements ToolProvider
 {
@@ -32,6 +33,8 @@ final class ToolCatalog implements ToolProvider
     private ScopeProbe $scope;
     /** @var array<string, Tool>|null name => tool, in catalog order */
     private ?array $tools = null;
+    /** @var array<string, string[]>|null list field => the fields its `query` can filter and sort on */
+    private ?array $queryable = null;
 
     /**
      * @param callable|null $authFailure callable(AuthFailure): HttpStatusException;
@@ -63,6 +66,9 @@ final class ToolCatalog implements ToolProvider
     {
         $descriptors = [];
         foreach ($this->visibleTools() as $tool) {
+            if ($tool instanceof GeneratedTool && $tool->listField() !== null) {
+                $tool = $tool->withQueryable($this->queryable()[$tool->listField()] ?? []);
+            }
             $descriptors[] = [
                 'name' => $tool->name(),
                 'title' => $tool->title(),
@@ -143,6 +149,31 @@ final class ToolCatalog implements ToolProvider
             }
         }
         return $this->tools;
+    }
+
+    /**
+     * QueryableFields' for every list tool, probed once, on the first
+     * tools/list (a call needs no description).
+     *
+     * @return array<string, string[]>
+     * @throws HttpStatusException for an AuthFailure
+     */
+    private function queryable(): array
+    {
+        if ($this->queryable === null) {
+            $lists = [];
+            foreach ($this->allTools() as $tool) {
+                if ($tool instanceof GeneratedTool && $tool->listField() !== null) {
+                    $lists[] = $tool->listField();
+                }
+            }
+            try {
+                $this->queryable = QueryableFields::probe($this->gql, $lists);
+            } catch (AuthFailure $e) {
+                throw $this->httpStatus($e);
+            }
+        }
+        return $this->queryable;
     }
 
     /** @throws HttpStatusException for an AuthFailure */
