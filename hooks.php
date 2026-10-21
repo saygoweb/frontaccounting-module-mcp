@@ -18,7 +18,9 @@ class hooks_mcp extends hooks
     /*
         Refuses unless the GraphQL module is active for the company with an
         Executor of contract 1.x (spec §3.2). The OAuth tables live in company 0
-        whichever company is being activated (spec §9).
+        whichever company is being activated (spec §9). Warns, without refusing,
+        when OAuth is served but FrontAccounting's root .htaccess lacks spec
+        §5.1's rule.
     */
     public function activate_extension($company, $check_only = true)
     {
@@ -26,6 +28,10 @@ class hooks_mcp extends hooks
         if ($graphql !== null) {
             display_error($graphql);
             return false;
+        }
+        $rewrite = $this->root_rewrite_problem();
+        if ($rewrite !== null) {
+            display_warning($rewrite);
         }
 
         $updates = array(
@@ -60,6 +66,23 @@ class hooks_mcp extends hooks
             return _('The MCP module needs a GraphQL module with Executor contract 1.x: update the GraphQL module.');
         }
         return null;
+    }
+
+    /*
+        RootRewriteCheck's problem, or null. This module's autoloader is loaded
+        here, after graphql's (graphql_problem() found it), as index.php orders
+        them. A config_mcp.php the endpoint would refuse is not this check's to
+        report: the endpoint answers it on its first request.
+    */
+    private function root_rewrite_problem()
+    {
+        require_once __DIR__ . '/vendor/autoload.php';
+        try {
+            $config = \FA\Mcp\Config::fromFile(__DIR__ . '/config_mcp.php');
+        } catch (\FA\Mcp\ConfigException $e) {
+            return null;
+        }
+        return \FA\Mcp\Http\RootRewriteCheck::problem($config, $GLOBALS['path_to_root'] . '/.htaccess');
     }
 
     /**

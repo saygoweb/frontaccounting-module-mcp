@@ -7,6 +7,7 @@ use FA\GraphQL\Fa\Bootstrap;
 use FA\GraphQL\Fa\CompanyContext;
 use FA\GraphQL\Fa\FaMessages;
 use FA\GraphQL\Fa\FaSession;
+use FA\Mcp\Http\RootRewriteCheck;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -22,6 +23,9 @@ class ActivateExtensionTest extends TestCase
     private const SCRATCH = 97;
 
     private string $root;
+
+    /** FrontAccounting's root .htaccess before a test replaced it, or null. */
+    private ?string $htaccess = null;
 
     protected function setUp(): void
     {
@@ -41,6 +45,9 @@ class ActivateExtensionTest extends TestCase
 
     protected function tearDown(): void
     {
+        if ($this->htaccess !== null) {
+            file_put_contents($this->root . '/.htaccess', $this->htaccess);
+        }
         $dir = $this->root . '/company/' . self::SCRATCH;
         if (is_file($dir . '/installed_extensions.php')) {
             unlink($dir . '/installed_extensions.php');
@@ -64,6 +71,31 @@ class ActivateExtensionTest extends TestCase
             [$c['tbpref'] . 'mcp_oauth_client', $c['tbpref'] . 'mcp_oauth_code', $c['tbpref'] . 'mcp_oauth_refresh'],
             $tables
         );
+    }
+
+    /** tools/init.sh's config_mcp.php serves OAuth at http://localhost/modules/mcp. */
+    private function rootHtaccess(string $contents): void
+    {
+        $this->htaccess = (string) file_get_contents($this->root . '/.htaccess');
+        file_put_contents($this->root . '/.htaccess', $contents);
+    }
+
+    public function testActivationWithoutTheRootRuleWarnsAndGoesAhead(): void
+    {
+        $this->rootHtaccess("Options -Indexes\n");
+
+        $this->assertTrue((bool) (new \hooks_mcp())->activate_extension(0, false), implode("\n", FaMessages::errors()));
+        $warnings = FaMessages::warnings();
+        $this->assertCount(1, $warnings);
+        $this->assertStringContainsString(RootRewriteCheck::RULE, $warnings[0]);
+    }
+
+    public function testActivationWithTheRootRuleDoesNotWarn(): void
+    {
+        $this->rootHtaccess("RewriteEngine On\n" . RootRewriteCheck::RULE . "\n");
+
+        $this->assertTrue((bool) (new \hooks_mcp())->activate_extension(0, false), implode("\n", FaMessages::errors()));
+        $this->assertSame([], FaMessages::warnings());
     }
 
     public function testRefusedWhenGraphQlIsNotActiveForTheCompany(): void

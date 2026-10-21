@@ -2,6 +2,8 @@
 
 namespace FA\Mcp\Tests\Http;
 
+use FA\Mcp\Config;
+use FA\Mcp\Http\RootRewriteCheck;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -89,12 +91,9 @@ class OAuthFlowTest extends TestCase
         if (!is_writable($htaccess)) {
             $this->markTestSkipped('FA root .htaccess not writable');
         }
-        $current = (string) file_get_contents($htaccess);
-        if (strpos($current, self::ROOT_RULE_MARKER) === false) {
-            file_put_contents($htaccess, rtrim($current) . "\n\n" . self::ROOT_RULE_MARKER . " (modules/mcp)\n"
-                . "RewriteEngine On\n"
-                . 'RewriteRule ^\.well-known/(oauth-authorization-server|openid-configuration|oauth-protected-resource)'
-                . "/modules/mcp/?$ modules/mcp/.well-known/$1 [L]\n");
+        if (RootRewriteCheck::problem(Config::fromArray(['base_url' => self::baseUrl()]), $htaccess) !== null) {
+            file_put_contents($htaccess, rtrim((string) file_get_contents($htaccess)) . "\n\n"
+                . self::ROOT_RULE_MARKER . " (modules/mcp)\nRewriteEngine On\n" . RootRewriteCheck::RULE . "\n");
         }
 
         $path = (string) parse_url(self::baseUrl(), PHP_URL_PATH);

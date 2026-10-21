@@ -2,7 +2,8 @@
 
 /*
     The FrontAccounting symbols hooks.php uses, for phpstan only (never loaded):
-    includes/hooks.inc's base class and includes/ui/ui_msgs.inc's display_error().
+    includes/hooks.inc's base class and includes/ui/ui_msgs.inc's display_error()
+    and display_warning().
     FrontAccounting is not beside this module outside its CI image.
 */
 
@@ -29,5 +30,14 @@ class hooks
  * @return void
  */
 function display_error($msg, $center = true)
+{
+}
+
+/**
+ * @param string $msg
+ * @param bool $center
+ * @return void
+ */
+function display_warning($msg, $center = true)
 {
 }

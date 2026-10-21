@@ -16,6 +16,7 @@
   detection, and an optional root rewrite for RFC 8414 metadata.
 - Origin guard, CORS, TLS requirement, stray-output capture.
 - Activation checks that the GraphQL module is active and creates the OAuth
-  tables.
+  tables, and warns when OAuth is served but FrontAccounting's root `.htaccess`
+  lacks the root rewrite rule.
 - CI on the FrontAccounting image (cp and upstream, PHP 7.4 and 8.3), Codecov
   coverage and README badges.
