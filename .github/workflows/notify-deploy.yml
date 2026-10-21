@@ -1,0 +1,38 @@
+name: Notify deploy
+
+# When CI passes on main, ask cambell-prince/frontaccounting to deploy
+# bms.saygoweb.com. Its deploy-bms.yml decides what to ship itself, so this
+# only says "something went green". It is a workflow of its own, not a job in
+# ci.yml, so it runs once CI has finished and counts as green.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Send extension-green
+        env:
+          GH_TOKEN: ${{ secrets.FA_DEPLOY_DISPATCH }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+              echo "::notice::FA_DEPLOY_DISPATCH is not set, so no deploy was asked for"
+              exit 0
+          fi
+          gh api repos/cambell-prince/frontaccounting/dispatches \
+              -f event_type=extension-green \
+              -f "client_payload[component]=modules/mcp" \
+              -f "client_payload[sha]=$SHA" \
+              -f "client_payload[run_url]=$RUN_URL"
