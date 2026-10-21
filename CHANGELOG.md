@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 1.1.1 - 2026-10-22
+
+- `invoice_list`, `customer_payment_list` and `delivery_list` descriptions say how
+  to ask for unpaid invoices (`{"outstanding": {"$gt": 0}, "voided": false}`,
+  newest first with `sort: ["-date"]`, overdue with `dueDate`), unallocated
+  payments and non-voided deliveries. A hint appears only when the list's
+  queryable fields include the ones it names, so an older graphql is described
+  as it is.
+- The OAuth HTTP test tolerates clock ticks in `expires_in` (#15).
+
+## 1.1.0 - 2026-10-22
 
 - The fields each list's selector and sort take are read from the `query`
   argument's description in the GraphQL schema ("Fields for selector and sort:

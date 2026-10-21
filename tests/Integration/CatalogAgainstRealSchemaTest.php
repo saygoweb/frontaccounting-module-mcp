@@ -133,9 +133,10 @@ class CatalogAgainstRealSchemaTest extends TestCase
                 $tool['name']
             );
             if ($tool['name'] === 'invoice_list') {
-                // Computed, so not in the schema-only guess this replaces: the scalars of the row type.
-                $this->assertNotContains('outstanding', explode(', ', $named[1]));
+                // graphql 27+ queries the computed fields, which the row type's scalars do not include.
+                $this->assertContains('outstanding', explode(', ', $named[1]));
                 $this->assertContains('date', explode(', ', $named[1]));
+                $this->assertStringContainsString('Unpaid invoices: selector', $tool['description']);
             }
             $checked++;
         }

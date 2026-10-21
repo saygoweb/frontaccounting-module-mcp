@@ -40,6 +40,28 @@ final class GeneratedTool implements Tool
     /** Starts a count tool's list of the fields its `query` can filter on (it ignores sort). */
     private const QUERYABLE_COUNT = 'Fields for `query.selector`: ';
 
+    /**
+     * One line of advice for a list's description, by list field: each entry is
+     * [the queryable fields it names, the line], shown only when the list's
+     * `query` takes all of them, so an older graphql is described as it is.
+     */
+    private const HINTS = [
+        'invoiceList' => [
+            [
+                ['outstanding', 'voided'],
+                'Unpaid invoices: selector {"outstanding": {"$gt": 0}, "voided": false}; add customerId to narrow to'
+                . ' one customer; sort ["-date"] for newest first.',
+            ],
+            [['dueDate'], 'Overdue: also {"dueDate": {"$lt": "<today>"}}.'],
+        ],
+        'customerPaymentList' => [
+            [['unallocated', 'voided'], 'Unallocated payments: selector {"unallocated": {"$gt": 0}, "voided": false}.'],
+        ],
+        'deliveryList' => [
+            [['voided'], 'Without voided deliveries: selector {"voided": false}.'],
+        ],
+    ];
+
     /** The input type of a list's `query` argument. */
     private const MANGO = 'MangoInput';
 
@@ -154,6 +176,18 @@ final class GeneratedTool implements Tool
         return $tool;
     }
 
+    /** The list's advice whose fields it can query, or ''. */
+    private function hint(): string
+    {
+        $lines = [];
+        foreach (self::HINTS[$this->listField() ?? ''] ?? [] as [$needs, $line]) {
+            if (array_diff($needs, $this->queryable) === []) {
+                $lines[] = $line;
+            }
+        }
+        return implode(' ', $lines);
+    }
+
     /** `customerList` => `customer_list`. */
     public static function snakeCase(string $name): string
     {
@@ -191,6 +225,10 @@ final class GeneratedTool implements Tool
         if ($this->queryable !== []) {
             $description .= "\n\n" . ($this->countOf !== null ? self::QUERYABLE_COUNT : self::QUERYABLE)
                 . implode(', ', $this->queryable) . '.';
+        }
+        $hint = $this->hint();
+        if ($hint !== '') {
+            $description .= "\n\n" . $hint;
         }
         if ($this->ownFields && $this->onRequest !== []) {
             $description .= "\n\n" . self::ON_REQUEST . '`' . implode('`, `', $this->onRequest) . '`.';
