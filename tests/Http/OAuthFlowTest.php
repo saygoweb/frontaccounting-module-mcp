@@ -120,7 +120,11 @@ class OAuthFlowTest extends TestCase
     public function testTheCodeFlowRefreshAndReuseDetection(): void
     {
         $first = $this->connect('write');
-        $this->assertSame(3600, $first['expires_in']);
+        // The server's real clock may tick between issuing the token and
+        // answering, so the remaining lifetime can be a second or two short.
+        $this->assertIsInt($first['expires_in']);
+        $this->assertGreaterThanOrEqual(3595, $first['expires_in']);
+        $this->assertLessThanOrEqual(3600, $first['expires_in']);
         $this->assertSame('write', $first['scope']);
         $this->assertSame('Bearer', $first['token_type']);
         $this->assertContains('customer_create', $this->toolNames($first['access_token']));
