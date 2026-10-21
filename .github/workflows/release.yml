@@ -1,0 +1,51 @@
+name: Release
+
+# On a pushed v<semver> tag: the same tests as ci.yml, then package and
+# publish the GitHub release (cambell-prince/frontaccounting
+# .github/workflows/plugin-release.yml).
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        fa: [cp, upstream]
+        php: ['7.4', '8.3']
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@master-cp
+    with:
+      fa: ${{ matrix.fa }}
+      php: ${{ matrix.php }}
+      dataset: demo
+      setup: composer install --no-interaction --no-progress
+      with: |
+        sgw_sales=https://github.com/saygoweb/frontaccounting-module-sgw_sales.git@master
+        graphql=https://github.com/saygoweb/frontaccounting-module-graphql.git@main
+      test: sh tools/ci.sh
+
+  coverage:
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@master-cp
+    with:
+      fa: cp
+      php: '8.3'
+      dataset: demo
+      setup: composer install --no-interaction --no-progress
+      with: |
+        sgw_sales=https://github.com/saygoweb/frontaccounting-module-sgw_sales.git@master
+        graphql=https://github.com/saygoweb/frontaccounting-module-graphql.git@main
+      test: sh tools/coverage.sh
+      coverage: build/coverage.xml
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  release:
+    needs: [test, coverage]
+    permissions:
+      contents: write
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-release.yml@master-cp
+    with:
+      module: mcp
+      deploy-branch: main

@@ -3,3 +3,5 @@
 /config_mcp.php
 /.phpunit.result.cache
 /.superpowers/
+/_init/
+/build/dist/

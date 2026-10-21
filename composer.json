@@ -39,6 +39,11 @@
             "FA\\Mcp\\Tests\\": "tests/"
         }
     },
+    "extra": {
+        "fa-module": {
+            "name": "MCP server"
+        }
+    },
     "scripts": {
         "test": "phpunit -c phpunit.xml",
         "test:coverage": "phpunit -c phpunit.xml --coverage-clover build/coverage.xml --coverage-text",
@@ -51,6 +56,8 @@
             "@cs:check",
             "@analyze"
         ],
+        "fa:version": "sh ../../docker/ci/fa-module version",
+        "fa:package": "sh ../../docker/ci/fa-module package",
         "ci": [
             "@quality",
             "@test"
