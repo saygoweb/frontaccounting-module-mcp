@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased - 1.0.0
+## 1.0.0 - 2026-10-21
 
+- Versioned releases: pushing a `v<semver>` tag publishes the packaged module as a
+  GitHub release; activating the module refreshes its stored version.
 - MCP server over HTTP at `modules/mcp/` (JSON-RPC `POST /`), a client of the
   GraphQL module's in-process Executor.
 - Tools generated from the caller's GraphQL schema, one per root field, with

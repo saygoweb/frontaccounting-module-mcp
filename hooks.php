@@ -24,6 +24,9 @@ class hooks_mcp extends hooks
     */
     public function activate_extension($company, $check_only = true)
     {
+        if (!$check_only) {
+            $this->refresh_own_version();
+        }
         $graphql = $this->graphql_problem($company);
         if ($graphql !== null) {
             display_error($graphql);
@@ -39,6 +42,41 @@ class hooks_mcp extends hooks
         );
 
         return $this->update_databases(0, $updates, $check_only);
+    }
+
+    /*
+        Stock FrontAccounting reads modules/<id>/_init/config (written by the
+        module's build, docker/ci/fa-module) only when the extension is first
+        installed. Refresh the stored version on activation so an upgrade shows
+        its version on Install/Activate Extensions.
+    */
+    public function refresh_own_version()
+    {
+        global $path_to_root;
+
+        $file = $path_to_root . '/modules/' . $this->module_name . '/_init/config';
+        if (!is_file($file)) {
+            return;
+        }
+        $version = null;
+        foreach (file($file) as $line) {
+            if (preg_match('/^Version:\s*(\S+)/', $line, $m)) {
+                $version = $m[1];
+            }
+        }
+        if ($version === null) {
+            return;
+        }
+        $exts = get_company_extensions();
+        foreach ($exts as $i => $ext) {
+            if (@$ext['package'] === $this->module_name && @$ext['type'] === 'extension') {
+                if (@$ext['version'] !== $version) {
+                    $exts[$i]['version'] = $version;
+                    update_extensions($exts);
+                }
+                return;
+            }
+        }
     }
 
     /*

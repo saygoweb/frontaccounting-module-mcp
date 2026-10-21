@@ -41,3 +41,20 @@ function display_error($msg, $center = true)
 function display_warning($msg, $center = true)
 {
 }
+
+/**
+ * @return array<int, array<string, mixed>>
+ */
+function get_company_extensions()
+{
+    return array();
+}
+
+/**
+ * @param array<int, array<string, mixed>> $exts
+ * @return bool
+ */
+function update_extensions($exts)
+{
+    return true;
+}
