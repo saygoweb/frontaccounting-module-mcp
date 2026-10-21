@@ -121,13 +121,18 @@ module's own and never creates a FrontAccounting login session.
 The issuer is `base_url`. RFC 8414 puts the metadata of an issuer with a path
 at the origin root (`/.well-known/oauth-authorization-server/modules/mcp`),
 which a module cannot serve by itself. The module serves the path-appended
-forms that MCP clients also try. For clients that ask at the root, add this
-optional rule to FrontAccounting's root `.htaccess` (with `RewriteEngine On`
-above it if the file has none):
+forms too, but some clients (Claude Code among them) ask only at the root: when
+they find nothing there they fall back to `POST /register` at the origin, which
+the web server answers `404`. So add this rule to FrontAccounting's root
+`.htaccess` (with `RewriteEngine On` above it if the file has none):
 
 ```
 RewriteRule ^\.well-known/(oauth-authorization-server|openid-configuration|oauth-protected-resource)/modules/mcp/?$ modules/mcp/.well-known/$1 [L]
 ```
+
+Activating the module warns when OAuth is served (and FrontAccounting is the
+origin root) but the root `.htaccess` has no such rule. On a web server other
+than Apache, route those three root paths to the module the same way.
 
 ## Configuration
 
