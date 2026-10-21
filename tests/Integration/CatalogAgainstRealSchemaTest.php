@@ -115,7 +115,10 @@ class CatalogAgainstRealSchemaTest extends TestCase
         $checked = 0;
         foreach ($catalog->listTools() as $tool) {
             $properties = $tool['inputSchema']['properties'];
-            if (!is_array($properties) || !isset($properties['query']['properties']['sort'])) {
+            if (
+                !is_array($properties) || !isset($properties['query']['properties']['sort'])
+                || substr($tool['name'], -6) === '_count'
+            ) {
                 continue;
             }
             $line = '/Fields for `query.selector` and `query.sort`: ([^.]*)\./';
@@ -137,6 +140,43 @@ class CatalogAgainstRealSchemaTest extends TestCase
             $checked++;
         }
         $this->assertGreaterThan(15, $checked);
+    }
+
+    /**
+     * Each list graphql counts has a count tool, described by the list: the
+     * same fields, for the selector only.
+     */
+    public function testEachCountToolIsDescribedByItsList(): void
+    {
+        $descriptions = array_column($this->catalog('read')->listTools(), 'description', 'name');
+        $counted = 0;
+        foreach ($descriptions as $name => $description) {
+            if (substr($name, -6) !== '_count') {
+                continue;
+            }
+            $list = substr($name, 0, -6) . '_list';
+            $this->assertArrayHasKey($list, $descriptions, $name);
+            $this->assertStringStartsWith('How many rows ' . $list . ' returns for this `query`', $description);
+            $line = '/Fields for `query.selector` and `query.sort`: ([^.]*)\./';
+            $this->assertSame(1, preg_match($line, $descriptions[$list], $listed), $list);
+            $this->assertStringEndsWith("\n\nFields for `query.selector`: " . $listed[1] . '.', $description, $name);
+            $counted++;
+        }
+        $this->assertGreaterThan(15, $counted);
+    }
+
+    public function testAFullPageSaysTheTotalTheCountToolGives(): void
+    {
+        $catalog = $this->catalog('read');
+        $count = $catalog->callTool('customer_count', []);
+        $this->assertFalse($count['isError'], $count['content'][0]['text']);
+        $total = $count['structuredContent']['data'];
+        $this->assertIsInt($total);
+        $this->assertGreaterThan(1, $total, 'the demo dataset has customers');
+
+        $result = $catalog->callTool('customer_list', ['query' => ['limit' => 1, 'skip' => 1], 'fields' => 'id']);
+        $this->assertFalse($result['isError'], $result['content'][0]['text']);
+        $this->assertStringStartsWith('Row 2 of ' . $total . ' returned; ', $result['structuredContent']['note']);
     }
 
     public function testInvoiceListSortsNewestFirstAsTheSchemaSays(): void

@@ -80,6 +80,8 @@ type Query {
   """The signed-in user."""
   me: Viewer!
   customerList(query: MangoInput): [Customer!]!
+  """How many rows customerList returns for this query with no limit: the same selector, scope and access. limit, skip and sort are ignored, so a page's query can be passed as it is."""
+  customerCount(query: MangoInput): Int!
   # sgw_sales' extension field; its real argument list is simplified.
   recurringDueList(asOf: String!): [Customer!]!
 }

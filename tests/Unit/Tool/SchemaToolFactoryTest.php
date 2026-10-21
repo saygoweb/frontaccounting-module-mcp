@@ -47,8 +47,8 @@ class SchemaToolFactoryTest extends TestCase
     public function testNamesQueriesThenMutationsEachSorted(): void
     {
         $this->assertSame(
-            ['customer_list', 'me', 'recurring_due_list', 'customer_create', 'customer_delete', 'customer_update',
-                'invoice_email'],
+            ['customer_count', 'customer_list', 'me', 'recurring_due_list', 'customer_create', 'customer_delete',
+                'customer_update', 'invoice_email'],
             array_keys(self::tools())
         );
     }
@@ -69,7 +69,7 @@ class SchemaToolFactoryTest extends TestCase
             $this->assertTrue($tools[$name]->requiresWrite(), $name);
             $this->assertFalse($tools[$name]->annotations()['readOnlyHint'], $name);
         }
-        foreach (['customer_list', 'me', 'recurring_due_list'] as $name) {
+        foreach (['customer_count', 'customer_list', 'me', 'recurring_due_list'] as $name) {
             $this->assertFalse($tools[$name]->requiresWrite(), $name);
         }
         foreach ($tools as $name => $tool) {
@@ -150,6 +150,44 @@ class SchemaToolFactoryTest extends TestCase
         $this->assertSame('object', $tools['me']->inputSchema()['type']);
         $this->assertFalse($tools['me']->inputSchema()['additionalProperties']);
         $this->assertSame(['asOf'], $tools['recurring_due_list']->inputSchema()['required']);
+    }
+
+    public function testOnlyAMangoFieldThatReturnsAListGetsTheLimit(): void
+    {
+        $schema = BuildSchema::build('
+            input MangoInput { selector: String limit: Int }
+            type Query { """Odd.""" oddCount(query: MangoInput): Int! oddList(query: MangoInput): [Int] }
+        ');
+        $gql = new FakeGraphQlGateway(['data' => ['oddCount' => 3]], $schema);
+        $tools = (new SchemaToolFactory(50))->fromSchema($schema);
+        $this->assertSame(['odd_count', 'odd_list'], array_map(static function (Tool $tool): string {
+            return $tool->name();
+        }, $tools));
+        $tools[0]->call([], $gql);
+        $this->assertSame('query { oddCount }', $gql->calls[0]['document']);
+        $tools[1]->call([], $gql);
+        $this->assertSame(['query' => ['limit' => 50]], $gql->calls[1]['variables']);
+    }
+
+    public function testACountWithoutItsListIsAPlainTool(): void
+    {
+        $schema = BuildSchema::build('
+            input MangoInput { selector: String limit: Int }
+            type Query { """Odd.""" oddCount(query: MangoInput): Int! }
+        ');
+        $tool = (new SchemaToolFactory(50))->fromSchema($schema)[0];
+        $this->assertSame('Odd.', $tool->description());
+        $this->assertNull($tool->queryableList());
+    }
+
+    public function testACountIsDescribedByItsList(): void
+    {
+        $this->assertSame(
+            'How many rows customer_list returns for this `query`: the same selector, scope and access. limit,'
+            . ' skip and sort are ignored, so a page\'s query can be passed as it is.',
+            self::tools()['customer_count']->description()
+        );
+        $this->assertSame('Customer count', self::tools()['customer_count']->title());
     }
 
     public function testSchemaWithoutMutations(): void
