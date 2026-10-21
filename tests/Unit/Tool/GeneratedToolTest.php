@@ -94,8 +94,30 @@ class GeneratedToolTest extends TestCase
             'query ($query: MangoInput) { customerList(query: $query) {',
             $gql->calls[0]['document']
         );
+        $note = '50 rows returned, the limit; more may exist: repeat with query.skip: 50, or narrow the selector.';
+        $this->assertSame($note, $mcp['structuredContent']['note']);
+        // Clients that read only `content` see the note too.
+        $this->assertStringContainsString(json_encode($note), $mcp['content'][0]['text']);
+    }
+
+    public function testAnExplicitLimitThatIsReachedIsNotedWithTheNextSkip(): void
+    {
+        $rows = array_fill(0, 10, ['id' => '1', 'name' => 'A']);
+        $gql = new FakeGraphQlGateway(['data' => ['customerList' => $rows]]);
+        $mcp = $this->tool('customer_list')->call(['query' => ['limit' => 10, 'skip' => 20]], $gql)->toMcp();
         $this->assertSame(
-            'limit applied: 50; pass query.limit or query.skip for more',
+            '10 rows returned, the limit; more may exist: repeat with query.skip: 30, or narrow the selector.',
+            $mcp['structuredContent']['note']
+        );
+    }
+
+    public function testTheDefaultLimitReachedOnALaterPageCountsFromItsSkip(): void
+    {
+        $rows = array_fill(0, 50, ['id' => '1', 'name' => 'A']);
+        $gql = new FakeGraphQlGateway(['data' => ['customerList' => $rows]]);
+        $mcp = $this->tool('customer_list')->call(['query' => ['skip' => 50]], $gql)->toMcp();
+        $this->assertSame(
+            '50 rows returned, the limit; more may exist: repeat with query.skip: 100, or narrow the selector.',
             $mcp['structuredContent']['note']
         );
     }
@@ -107,14 +129,31 @@ class GeneratedToolTest extends TestCase
         $this->assertSame(['skip' => 50, 'limit' => 50], $gql->calls[0]['variables']['query']);
     }
 
-    public function testNoNoteWhenFewerRowsOrExplicitLimit(): void
+    public function testNoNoteBelowTheLimit(): void
     {
         $gql = new FakeGraphQlGateway(['data' => ['customerList' => [['id' => '1', 'name' => 'A']]]]);
         $this->assertArrayNotHasKey('note', $this->tool('customer_list')->call([], $gql)->toMcp()['structuredContent']);
 
-        $rows = array_fill(0, 50, ['id' => '1', 'name' => 'A']);
+        $rows = array_fill(0, 9, ['id' => '1', 'name' => 'A']);
         $gql = new FakeGraphQlGateway(['data' => ['customerList' => $rows]]);
-        $mcp = $this->tool('customer_list')->call(['query' => ['limit' => 50]], $gql)->toMcp();
+        $mcp = $this->tool('customer_list')->call(['query' => ['limit' => 10]], $gql)->toMcp();
+        $this->assertArrayNotHasKey('note', $mcp['structuredContent']);
+    }
+
+    public function testALimitOfOneIsOneRow(): void
+    {
+        $gql = new FakeGraphQlGateway(['data' => ['customerList' => [['id' => '1', 'name' => 'A']]]]);
+        $mcp = $this->tool('customer_list')->call(['query' => ['limit' => 1]], $gql)->toMcp();
+        $this->assertSame(
+            '1 row returned, the limit; more may exist: repeat with query.skip: 1, or narrow the selector.',
+            $mcp['structuredContent']['note']
+        );
+    }
+
+    public function testNoNoteForALimitOfZero(): void
+    {
+        $gql = new FakeGraphQlGateway(['data' => ['customerList' => []]]);
+        $mcp = $this->tool('customer_list')->call(['query' => ['limit' => 0]], $gql)->toMcp();
         $this->assertArrayNotHasKey('note', $mcp['structuredContent']);
     }
 

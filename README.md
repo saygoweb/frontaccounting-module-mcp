@@ -64,7 +64,10 @@ claude mcp add --transport http fa https://fa.example.com/modules/mcp/ \
 - **Arguments** come from the field's GraphQL arguments. List tools take
   `query` and, inside it, `selector` (a JSON object, or its JSON-encoded
   string), `limit` and `skip`. When `query.limit` is missing, `default_list_limit`
-  (50) is applied, and the result says so when exactly that many rows return.
+  (50) is applied. When a list returns exactly `limit` rows (the default or the
+  caller's), the result's `note` says more may exist and gives the next page's
+  `query.skip` (`skip` + `limit`). It gives no total: the GraphQL lists don't
+  count their rows yet.
 - **`fields`** (optional string) replaces the default selection set with a
   GraphQL selection body. By default every scalar and enum field is returned
   (lists of them too, such as an invoice's `deliveryIds`), plus the scalars of

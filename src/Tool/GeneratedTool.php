@@ -13,7 +13,9 @@ use GraphQL\Type\Definition\FieldDefinition;
  * One root field of the GraphQL schema as a tool (spec §6.3). The arguments
  * map one to one onto the field's, plus an optional `fields` selection set
  * unless the field has an argument of that name; a list field's missing
- * `query.limit` is filled in so a model cannot pull a whole ledger by accident.
+ * `query.limit` is filled in so a model cannot pull a whole ledger by accident,
+ * and a list that comes back with `limit` rows carries a note that more may
+ * exist and the `query.skip` of the next page.
  */
 final class GeneratedTool implements Tool
 {
@@ -160,14 +162,16 @@ final class GeneratedTool implements Tool
             unset($variables['fields']);
         }
 
-        $injected = false;
+        $limit = null;
+        $skip = 0;
         if ($this->listLimit !== null) {
             $query = $variables['query'] ?? [];
             if (is_array($query)) {
                 if (!isset($query['limit'])) {
                     $query['limit'] = $this->listLimit;
-                    $injected = true;
                 }
+                $limit = is_int($query['limit']) ? $query['limit'] : null;
+                $skip = isset($query['skip']) && is_int($query['skip']) ? $query['skip'] : 0;
                 if (isset($query['selector']) && is_array($query['selector'])) {
                     $query['selector'] = self::encodeSelector($query['selector']);
                 }
@@ -187,8 +191,8 @@ final class GeneratedTool implements Tool
 
         $note = null;
         $rows = $envelope['data'][$this->field->name] ?? null;
-        if ($injected && is_array($rows) && count($rows) === $this->listLimit) {
-            $note = 'limit applied: ' . $this->listLimit . '; pass query.limit or query.skip for more';
+        if ($limit !== null && $limit > 0 && is_array($rows) && count($rows) === $limit) {
+            $note = self::limitReached($limit, $skip);
         }
         return ToolResult::fromGraphQl($envelope, $this->field->name, $note);
     }
@@ -224,6 +228,17 @@ final class GeneratedTool implements Tool
             return $refusal;
         }
         return null;
+    }
+
+    /**
+     * The note on a list that came back full: there may be more rows than
+     * the page holds, and the next page starts at $skip + $limit. (No total:
+     * the GraphQL lists don't give one yet.)
+     */
+    private static function limitReached(int $limit, int $skip): string
+    {
+        return $limit . ($limit === 1 ? ' row' : ' rows') . ' returned, the limit; more may exist: repeat with'
+            . ' query.skip: ' . ($skip + $limit) . ', or narrow the selector.';
     }
 
     /** graphql's MangoInput takes the selector JSON-encoded; {} stays an object. */

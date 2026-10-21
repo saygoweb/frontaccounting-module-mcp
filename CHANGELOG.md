@@ -10,6 +10,8 @@
 - The default selection leaves out lists of nested objects (an invoice's
   `lines`, a customer's `branches` and `contacts`), and each tool's description
   names what it leaves out, ready to paste into `fields`.
+- A list that returns exactly `limit` rows, the default limit or the caller's,
+  carries a note that more may exist and the `query.skip` of the next page.
 - Read-only and read-and-change connections; read-only hides and refuses
   mutations.
 - Bearer authentication with any GraphQL access or machine token.
