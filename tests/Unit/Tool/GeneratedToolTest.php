@@ -464,6 +464,61 @@ class GeneratedToolTest extends TestCase
         $this->assertSame($tool->description(), $tool->withQueryable([])->description());
     }
 
+    private function listToolOf(string $listField, string $row): GeneratedTool
+    {
+        $schema = BuildSchema::build('
+            input MangoInput { selector: String limit: Int skip: Int sort: [String] }
+            type Row { id: ID ' . $row . ' }
+            type Query { ' . $listField . '(query: MangoInput): [Row!]! }
+        ');
+        foreach ((new SchemaToolFactory(50))->fromSchema($schema) as $tool) {
+            if ($tool instanceof GeneratedTool && $tool->listField() === $listField) {
+                return $tool;
+            }
+        }
+        $this->fail("no $listField");
+    }
+
+    public function testInvoiceListSaysHowToAskForUnpaidInvoices(): void
+    {
+        $tool = $this->listToolOf('invoiceList', 'outstanding: Float voided: Boolean dueDate: String');
+        $text = $tool->withQueryable(['id', 'outstanding', 'voided', 'dueDate'])->description();
+        $this->assertStringContainsString(
+            'Unpaid invoices: selector {"outstanding": {"$gt": 0}, "voided": false}; add customerId to narrow to one'
+            . ' customer; sort ["-date"] for newest first. Overdue: also {"dueDate": {"$lt": "<today>"}}.',
+            $text
+        );
+    }
+
+    public function testAHintIsOmittedWhenTheListDoesNotQueryItsFields(): void
+    {
+        $tool = $this->listToolOf('invoiceList', 'total: Float');
+        $this->assertStringNotContainsString('Unpaid invoices', $tool->description());
+        $this->assertStringNotContainsString('Unpaid invoices', $tool->withQueryable(['id', 'total'])->description());
+        $partial = $tool->withQueryable(['id', 'voided'])->description();
+        $this->assertStringNotContainsString('Unpaid invoices', $partial);
+        $overdueless = $tool->withQueryable(['id', 'outstanding', 'voided'])->description();
+        $this->assertStringContainsString('Unpaid invoices', $overdueless);
+        $this->assertStringNotContainsString('Overdue', $overdueless);
+    }
+
+    public function testPaymentAndDeliveryListsHaveHints(): void
+    {
+        $pay = $this->listToolOf('customerPaymentList', 'unallocated: Float voided: Boolean')
+            ->withQueryable(['id', 'unallocated', 'voided'])->description();
+        $this->assertStringContainsString('{"unallocated": {"$gt": 0}, "voided": false}', $pay);
+        $delivery = $this->listToolOf('deliveryList', 'voided: Boolean');
+        $named = $delivery->withQueryable(['id', 'voided']);
+        $this->assertStringContainsString('{"voided": false}', $named->description());
+        $this->assertStringNotContainsString('{"voided": false}', $delivery->description());
+    }
+
+    public function testACountToolCarriesNoHint(): void
+    {
+        $count = $this->tool('customer_count')->withQueryable(['id']);
+        $this->assertStringNotContainsString('Unpaid', $count->description());
+    }
+
     public function testAuthFailurePropagates(): void
     {
         $this->expectException(AuthFailure::class);
