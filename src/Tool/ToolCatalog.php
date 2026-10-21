@@ -152,7 +152,8 @@ final class ToolCatalog implements ToolProvider
     }
 
     /**
-     * QueryableFields' for every list tool, probed once, on the first
+     * QueryableFields' for every list tool, read once from the schema (probed for
+     * a list whose description lacks them), on the first
      * tools/list (a call needs no description).
      *
      * @return array<string, string[]>
@@ -168,7 +169,7 @@ final class ToolCatalog implements ToolProvider
                 }
             }
             try {
-                $this->queryable = QueryableFields::probe($this->gql, $lists);
+                $this->queryable = QueryableFields::fromSchema($this->gql, $this->gql->schema(), $lists);
             } catch (AuthFailure $e) {
                 throw $this->httpStatus($e);
             }
