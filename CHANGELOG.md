@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The fields each list's selector and sort take are read from the `query`
+  argument's description in the GraphQL schema ("Fields for selector and sort:
+  ..."), so computed fields are included and tools/list no longer sends a probe
+  request per list. A list whose description lacks the sentence (an older
+  graphql) is still probed, for that list only.
+
 ## 1.0.0 - 2026-10-21
 
 - Versioned releases: pushing a `v<semver>` tag publishes the packaged module as a
