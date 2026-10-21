@@ -14,7 +14,9 @@ use PHPUnit\Framework\TestCase;
 class SchemaToolFactoryTest extends TestCase
 {
     private const FIELDS_DESCRIPTION
-        = 'A GraphQL selection set to return instead of the default, e.g. `id name branches { branchCode }`.';
+        = 'A GraphQL selection set to return instead of the default, e.g. `id name contacts { id email }`. The'
+        . ' default is every scalar field and the scalars of each nested object; lists of nested objects (an'
+        . ' invoice\'s `lines`, a customer\'s `contacts`) are left out unless selected here.';
 
     /** @return array<string, Tool> */
     private static function tools(): array
@@ -105,14 +107,40 @@ class SchemaToolFactoryTest extends TestCase
     {
         $tools = self::tools();
         $this->assertSame(
-            'Query `customerList` of the FrontAccounting GraphQL API.',
+            'Query `customerList` of the FrontAccounting GraphQL API.'
+            . "\n\nNot returned unless asked for in `fields`: `contacts { id name email }`.",
             $tools['customer_list']->description()
         );
         $this->assertSame(
-            'Mutation `customerCreate` of the FrontAccounting GraphQL API.',
+            'Mutation `customerCreate` of the FrontAccounting GraphQL API.'
+            . "\n\nNot returned unless asked for in `fields`: `contacts { id name email }`.",
             $tools['customer_create']->description()
         );
         $this->assertSame('The signed-in user.', $tools['me']->description());
+    }
+
+    public function testTheDescriptionNamesEachListOfObjectsLeftOut(): void
+    {
+        $schema = BuildSchema::build('
+            type L { x: Int } type M { y: Int }
+            type T { id: ID ls: [L!]! ms: [M] }
+            type Query { """Things.""" things: [T!]! }
+        ');
+        $tool = (new SchemaToolFactory(50))->fromSchema($schema)[0];
+        $this->assertSame(
+            "Things.\n\nNot returned unless asked for in `fields`: `ls { x }`, `ms { y }`.",
+            $tool->description()
+        );
+    }
+
+    public function testNoHintWhenFieldsIsTheFieldsOwnArgument(): void
+    {
+        $schema = BuildSchema::build('
+            type L { x: Int } type T { id: ID ls: [L!]! }
+            type Query { """Things.""" things(fields: Int): [T!]! }
+        ');
+        $tool = (new SchemaToolFactory(50))->fromSchema($schema)[0];
+        $this->assertSame('Things.', $tool->description());
     }
 
     public function testTitleAndSchemaShape(): void

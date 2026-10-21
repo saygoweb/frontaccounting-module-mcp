@@ -28,7 +28,7 @@ class GeneratedToolTest extends TestCase
         $tool->call(['query' => ['limit' => 5]], $gql);
         $this->assertSame(
             'query ($query: MangoInput) { customerList(query: $query) '
-            . '{ id name currency creditStatus balance contacts { id name email } } }',
+            . '{ id name currency creditStatus balance } }',
             $gql->calls[0]['document']
         );
         $this->assertSame(['query' => ['limit' => 5]], $gql->calls[0]['variables']);
