@@ -38,9 +38,20 @@ class JsonSchemaMapperTest extends TestCase
                             'type' => ['string', 'object', 'null'],
                             'description' => 'A Mango selector: a JSON object, or the same object JSON-encoded.',
                         ],
-                        'limit' => ['type' => ['integer', 'null']],
-                        'skip' => ['type' => ['integer', 'null']],
-                        'sort' => ['type' => ['array', 'null'], 'items' => ['type' => ['string', 'null']]],
+                        'limit' => [
+                            'type' => ['integer', 'null'],
+                            'description' => 'Most rows to return.',
+                        ],
+                        'skip' => [
+                            'type' => ['integer', 'null'],
+                            'description' => 'Rows to skip, to page.',
+                        ],
+                        'sort' => [
+                            'type' => ['array', 'null'],
+                            'items' => ['type' => ['string', 'null']],
+                            'description' => 'Fields to order by: "field" ascending, "-field" descending;'
+                                . ' ["-date"] is newest first.',
+                        ],
                     ],
                     'additionalProperties' => false,
                 ],

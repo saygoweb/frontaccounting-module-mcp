@@ -18,7 +18,8 @@ use GraphQL\Type\Definition\Type;
  * a custom scalar a string with the scalar's description, an enum a string
  * `enum`, an input object a closed object (nesting capped at MAX_DEPTH), a list
  * an array; a non-null without a default is `required`. Descriptions of
- * arguments, fields and types are carried over.
+ * arguments, fields and types are carried over; the Mango query's `selector`,
+ * `limit`, `skip` and `sort` get ours (the sort syntax with an example).
  *
  * A nullable argument, input field or list item also accepts null, as GraphQL
  * does: its `type` gains "null" (and an enum's `enum` gains null), so an
@@ -32,6 +33,12 @@ final class JsonSchemaMapper
 
     private const MANGO = 'MangoInput';
     private const SELECTOR_DESCRIPTION = 'A Mango selector: a JSON object, or the same object JSON-encoded.';
+    /** The other MangoInput fields' descriptions; graphql gives them none. */
+    private const MANGO_DESCRIPTIONS = [
+        'limit' => 'Most rows to return.',
+        'skip' => 'Rows to skip, to page.',
+        'sort' => 'Fields to order by: "field" ascending, "-field" descending; ["-date"] is newest first.',
+    ];
 
     /**
      * @param string[] $omit argument names to leave out
@@ -134,7 +141,11 @@ final class JsonSchemaMapper
                 $properties[$name] = $field->getType() instanceof NonNull ? $selector : self::nullable($selector);
             } else {
                 $schema = self::forType($field->getType(), $depth);
-                $properties[$name] = self::withDescription($schema, $field->description);
+                $description = $field->description;
+                if ($type->name === self::MANGO && ($description === null || $description === '')) {
+                    $description = self::MANGO_DESCRIPTIONS[$name] ?? null;
+                }
+                $properties[$name] = self::withDescription($schema, $description);
             }
             if (self::isRequired($field)) {
                 $required[] = $name;

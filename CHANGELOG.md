@@ -12,6 +12,10 @@
   names what it leaves out, ready to paste into `fields`.
 - A list that returns exactly `limit` rows, the default limit or the caller's,
   carries a note that more may exist and the `query.skip` of the next page.
+- The `query` schema describes `limit`, `skip` and `sort` (`["-date"]` for
+  newest first), each list tool's description names the fields its selector
+  and sort take (as graphql reports them), and the instructions say how to
+  sort and that a `BAD_INPUT` message lists the valid fields.
 - Read-only and read-and-change connections; read-only hides and refuses
   mutations.
 - Bearer authentication with any GraphQL access or machine token.
