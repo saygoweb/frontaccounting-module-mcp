@@ -440,8 +440,11 @@ only where the extension is active.
   `MangoInput.selector` (a JSON-encoded `String` in graphql) accepts a JSON
   object or its JSON-encoded string; an object is encoded before sending.
 - **Selection set** (`SelectionBuilder`): every scalar and enum field of the
-  return type, plus each object or list-of-object field one level deep with its
-  scalars only. An optional `fields` argument (string, a GraphQL selection set
+  return type (lists of them too), plus each single object field one level deep
+  with its scalars only. A list-of-object field (an invoice's `lines`) is left
+  out of the default, as it is what makes a page of rows large; the tool's
+  description ends "Not returned unless asked for in `fields`: `lines { … }`",
+  naming each one with its scalars. An optional `fields` argument (string, a GraphQL selection set
   body) replaces the default; it is spliced into the document and validated by
   graphql like any other query. The spliced document must still be one
   operation whose only root selection is the tool's own field (unaliased, no
