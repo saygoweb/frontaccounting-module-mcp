@@ -18,7 +18,7 @@ The tool list is generated from the GraphQL schema of the caller's company, so
 it looks like this (names are examples):
 
 ```
-customer_list, customer_get, customer_create, customer_update, ...
+customer_list, customer_count, customer_get, customer_create, customer_update, ...
 sales_order_list, sales_order_create, ...
 recurring_due_list, recurring_generate     (only where sgw_sales is active)
 graphql_schema, graphql_query, graphql_mutate
@@ -65,9 +65,17 @@ claude mcp add --transport http fa https://fa.example.com/modules/mcp/ \
   `query` and, inside it, `selector` (a JSON object, or its JSON-encoded
   string), `limit` and `skip`. When `query.limit` is missing, `default_list_limit`
   (50) is applied. When a list returns exactly `limit` rows (the default or the
-  caller's), the result's `note` says more may exist and gives the next page's
-  `query.skip` (`skip` + `limit`). It gives no total: the GraphQL lists don't
-  count their rows yet.
+  caller's), the result's `note` gives the total and the next page's
+  `query.skip` (`skip` + `limit`): "Rows 1–50 of 312 returned; for more, repeat
+  with query.skip: 50, or narrow the selector." The total comes from the
+  list's `<entity>Count` (graphql 0.3.2 and later), asked for with the same
+  selector in a second in-process request, and only for a full page. Where
+  there is no count field, or it errors, the note says only that more may exist.
+- **Count tools.** Each `<entity>Count` beside a list is a tool too
+  (`invoice_count`, `customer_count`, ...), for "how many" without paging. It
+  takes the list's `query` (`limit`, `skip` and `sort` are accepted and
+  ignored), returns a number, and its description names the list it counts and
+  the same selector fields.
 - **`query.sort`** is graphql's: each item is a field, ascending, or `-field`
   (or `field desc`) for descending, so `sort: ["-date"]` is newest first. Each
   list tool's description names the fields its `selector` and `sort` take,

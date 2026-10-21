@@ -15,8 +15,8 @@ use PHPUnit\Framework\TestCase;
 class ToolCatalogTest extends TestCase
 {
     private const GENERATED = [
-        'customer_list', 'me', 'recurring_due_list', 'customer_create', 'customer_delete', 'customer_update',
-        'invoice_email',
+        'customer_count', 'customer_list', 'me', 'recurring_due_list', 'customer_create', 'customer_delete',
+        'customer_update', 'invoice_email',
     ];
 
     private static function gateway(?string $scope = 'write'): FakeGraphQlGateway
@@ -57,7 +57,7 @@ class ToolCatalogTest extends TestCase
     public function testReadHidesWriteTools(): void
     {
         $this->assertSame(
-            ['customer_list', 'me', 'recurring_due_list', 'graphql_schema', 'graphql_query'],
+            ['customer_count', 'customer_list', 'me', 'recurring_due_list', 'graphql_schema', 'graphql_query'],
             self::names(self::catalog(self::gateway('read'))->listTools())
         );
     }
@@ -138,6 +138,9 @@ class ToolCatalogTest extends TestCase
             $descriptions['customer_list']
         );
         $this->assertStringNotContainsString('query.sort', $descriptions['customer_create']);
+        // The count tool names its list's fields, for the selector only (it ignores sort), and is not probed.
+        $this->assertSame([], $gql->callsContaining('customerCount'));
+        $this->assertStringEndsWith("\n\nFields for `query.selector`: id, name.", $descriptions['customer_count']);
     }
 
     public function testScopeAndSchemaAreLoadedOncePerCatalog(): void

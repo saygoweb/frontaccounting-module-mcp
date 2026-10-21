@@ -2,6 +2,7 @@
 
 namespace FA\Mcp\Tool;
 
+use FA\Mcp\Gateway\AuthFailure;
 use FA\Mcp\Gateway\GraphQlGateway;
 use GraphQL\Error\SyntaxError;
 use GraphQL\Language\AST\FieldNode;
@@ -18,7 +19,10 @@ use GraphQL\Type\Definition\Type;
  * unless the field has an argument of that name; a list field's missing
  * `query.limit` is filled in so a model cannot pull a whole ledger by accident,
  * and a list that comes back with `limit` rows carries a note that more may
- * exist and the `query.skip` of the next page.
+ * exist and the `query.skip` of the next page. When the schema has the list's
+ * `<entity>Count`, a full page is counted with the same selector, in a second
+ * request, and the note says the total instead; a count that fails changes
+ * nothing. A count tool is described by the list it counts.
  */
 final class GeneratedTool implements Tool
 {
@@ -33,6 +37,12 @@ final class GeneratedTool implements Tool
     /** Starts the description's list of the fields a list's `query` can filter and sort on. */
     private const QUERYABLE = 'Fields for `query.selector` and `query.sort`: ';
 
+    /** Starts a count tool's list of the fields its `query` can filter on (it ignores sort). */
+    private const QUERYABLE_COUNT = 'Fields for `query.selector`: ';
+
+    /** The input type of a list's `query` argument. */
+    private const MANGO = 'MangoInput';
+
     /** Starts the description's list of what the default selection leaves out. */
     private const ON_REQUEST = 'Not returned unless asked for in `fields`: ';
 
@@ -43,6 +53,12 @@ final class GeneratedTool implements Tool
     private string $operation;
     private string $defaultSelection;
     private ?int $listLimit;
+    /** Whether the field takes a Mango `query`, whose object selector is JSON-encoded. */
+    private bool $mango;
+    /** A list's `<entity>Count`, to say a full page's total, or null. */
+    private ?FieldDefinition $countField = null;
+    /** A count tool's list field, which describes it, or null. */
+    private ?FieldDefinition $countOf = null;
     /** @var string[] */
     private array $onRequest;
     /** @var string[] the fields `query` can filter and sort on, named in the description */
@@ -54,7 +70,7 @@ final class GeneratedTool implements Tool
     /**
      * @param string $operation self::QUERY or self::MUTATION
      * @param string $defaultSelection SelectionBuilder's, '' for a scalar or enum return
-     * @param int|null $listLimit the query.limit to inject, or null when the field takes no Mango `query`
+     * @param int|null $listLimit the query.limit to inject, or null when the field is no list taking a Mango `query`
      * @param string[] $onRequest SelectionBuilder::onRequestFor()'s, named in the description
      */
     public function __construct(
@@ -68,6 +84,7 @@ final class GeneratedTool implements Tool
         $this->operation = $operation;
         $this->defaultSelection = $defaultSelection;
         $this->listLimit = $listLimit;
+        $this->mango = self::takesMangoQuery($field);
         $this->onRequest = $onRequest;
         $this->ownFields = $defaultSelection !== '' && $field->getArg('fields') === null;
     }
@@ -78,16 +95,54 @@ final class GeneratedTool implements Tool
         return $this->listLimit === null ? null : $this->field->name;
     }
 
+    /** Whether $field has a `query` argument of graphql's MangoInput. */
+    public static function takesMangoQuery(FieldDefinition $field): bool
+    {
+        $query = $field->getArg('query');
+        if ($query === null) {
+            return false;
+        }
+        $type = Type::getNamedType($query->getType());
+        return $type !== null && $type->name === self::MANGO;
+    }
+
+    /** This list tool with $countField, its `<entity>Count`, to say a full page's total. */
+    public function withCountField(FieldDefinition $countField): self
+    {
+        $tool = clone $this;
+        $tool->countField = $countField;
+        return $tool;
+    }
+
+    /** This tool as the count of $listField, the list field it counts, which describes it. */
+    public function asCountOf(FieldDefinition $listField): self
+    {
+        $tool = clone $this;
+        $tool->countOf = $listField;
+        $tool->inputSchema = null;
+        return $tool;
+    }
+
+    /**
+     * The list field whose queryable fields (QueryableFields') this tool's
+     * description names: a list's own, a count's list, else null.
+     */
+    public function queryableList(): ?string
+    {
+        return $this->listField() ?? ($this->countOf === null ? null : $this->countOf->name);
+    }
+
     /**
      * This tool with $names, the fields its `query` can filter and sort on
      * (QueryableFields'), named in its description: in the row type's
-     * declared order, any the type does not declare after them.
+     * declared order (a count's, its list's row type), any the type does not
+     * declare after them.
      *
      * @param string[] $names
      */
     public function withQueryable(array $names): self
     {
-        $type = Type::getNamedType($this->field->getType());
+        $type = Type::getNamedType(($this->countOf ?? $this->field)->getType());
         $declared = $type instanceof ObjectType || $type instanceof InterfaceType
             ? array_keys($type->getFields())
             : [];
@@ -117,17 +172,25 @@ final class GeneratedTool implements Tool
     }
 
     /**
-     * The field's description (or a generic one), then the fields a list's
-     * `query` can filter and sort on, then what `fields` can add to the
-     * default selection.
+     * The field's description (or a generic one; a count's names its list
+     * tool), then the fields a list's `query` can filter and sort on, then
+     * what `fields` can add to the default selection.
      */
     public function description(): string
     {
-        $description = $this->field->description !== null && $this->field->description !== ''
-            ? $this->field->description
-            : ucfirst($this->operation) . ' `' . $this->field->name . '` of the FrontAccounting GraphQL API.';
+        if ($this->countOf !== null) {
+            $list = self::snakeCase($this->countOf->name);
+            $description = 'How many rows ' . $list . ' returns for this `query`: the same selector, scope and'
+                . ' access. limit, skip and sort are ignored, so a page\'s query can be passed as it is.';
+        } elseif ($this->field->description !== null && $this->field->description !== '') {
+            $description = $this->field->description;
+        } else {
+            $description = ucfirst($this->operation) . ' `' . $this->field->name
+                . '` of the FrontAccounting GraphQL API.';
+        }
         if ($this->queryable !== []) {
-            $description .= "\n\n" . self::QUERYABLE . implode(', ', $this->queryable) . '.';
+            $description .= "\n\n" . ($this->countOf !== null ? self::QUERYABLE_COUNT : self::QUERYABLE)
+                . implode(', ', $this->queryable) . '.';
         }
         if ($this->ownFields && $this->onRequest !== []) {
             $description .= "\n\n" . self::ON_REQUEST . '`' . implode('`, `', $this->onRequest) . '`.';
@@ -143,6 +206,12 @@ final class GeneratedTool implements Tool
                 $properties = $schema['properties'] instanceof \stdClass ? [] : $schema['properties'];
                 $properties['fields'] = ['type' => 'string', 'description' => self::FIELDS_DESCRIPTION];
                 $schema['properties'] = $properties;
+            }
+            if ($this->countOf !== null && isset($schema['properties']['query']['properties'])) {
+                // A count ignores them: accepted, so a page's query passes, but not described as paging.
+                foreach (['limit', 'skip', 'sort'] as $ignored) {
+                    unset($schema['properties']['query']['properties'][$ignored]['description']);
+                }
             }
             $this->inputSchema = $schema;
         }
@@ -206,19 +275,20 @@ final class GeneratedTool implements Tool
 
         $limit = null;
         $skip = 0;
-        if ($this->listLimit !== null) {
-            $query = $variables['query'] ?? [];
-            if (is_array($query)) {
-                if (!isset($query['limit'])) {
-                    $query['limit'] = $this->listLimit;
-                }
-                $limit = is_int($query['limit']) ? $query['limit'] : null;
-                $skip = isset($query['skip']) && is_int($query['skip']) ? $query['skip'] : 0;
-                if (isset($query['selector']) && is_array($query['selector'])) {
-                    $query['selector'] = self::encodeSelector($query['selector']);
-                }
-                $variables['query'] = $query;
+        $query = $variables['query'] ?? null;
+        if ($this->listLimit !== null && ($query === null || is_array($query))) {
+            $query = $query ?? [];
+            if (!isset($query['limit'])) {
+                $query['limit'] = $this->listLimit;
             }
+            $limit = is_int($query['limit']) ? $query['limit'] : null;
+            $skip = isset($query['skip']) && is_int($query['skip']) ? $query['skip'] : 0;
+        }
+        if ($this->mango && is_array($query)) {
+            if (isset($query['selector']) && is_array($query['selector'])) {
+                $query['selector'] = self::encodeSelector($query['selector']);
+            }
+            $variables['query'] = $query;
         }
 
         $document = $this->document($args);
@@ -234,9 +304,39 @@ final class GeneratedTool implements Tool
         $note = null;
         $rows = $envelope['data'][$this->field->name] ?? null;
         if ($limit !== null && $limit > 0 && is_array($rows) && count($rows) === $limit) {
-            $note = self::limitReached($limit, $skip);
+            $total = is_array($query) ? $this->count($query, $gql) : null;
+            $note = $total === null ? self::limitReached($limit, $skip) : self::page($limit, $skip, $total);
         }
         return ToolResult::fromGraphQl($envelope, $this->field->name, $note);
+    }
+
+    /**
+     * How many rows the list holds for $query, by the count field, or null
+     * when there is none or it does not answer with a number. The count takes
+     * $query without limit, skip and sort, which it would ignore.
+     */
+    private function count(array $query, GraphQlGateway $gql): ?int
+    {
+        if ($this->countField === null) {
+            return null;
+        }
+        $name = $this->countField->name;
+        unset($query['limit'], $query['skip'], $query['sort']);
+        $arg = $this->countField->getArg('query');
+        if ($query === [] || $arg === null) {
+            $document = 'query { ' . $name . ' }';
+            $variables = [];
+        } else {
+            $document = 'query ($query: ' . $arg->getType()->toString() . ') { ' . $name . '(query: $query) }';
+            $variables = ['query' => $query];
+        }
+        try {
+            $envelope = $gql->execute($document, $variables);
+        } catch (AuthFailure $e) {
+            return null;
+        }
+        $total = $envelope['data'][$name] ?? null;
+        return empty($envelope['errors']) && is_int($total) ? $total : null;
     }
 
     /**
@@ -273,9 +373,24 @@ final class GeneratedTool implements Tool
     }
 
     /**
-     * The note on a list that came back full: there may be more rows than
-     * the page holds, and the next page starts at $skip + $limit. (No total:
-     * the GraphQL lists don't give one yet.)
+     * The note on a list that came back full and could be counted: the rows
+     * it holds of the $total, and the next page's skip unless it is the last.
+     * A total below the page (rows added between the two reads) is the page's.
+     */
+    private static function page(int $limit, int $skip, int $total): string
+    {
+        $last = $skip + $limit;
+        $rows = ($limit === 1 ? 'Row ' . $last : 'Rows ' . ($skip + 1) . '–' . $last)
+            . ' of ' . max($total, $last) . ' returned; ';
+        return $total > $last
+            ? $rows . 'for more, repeat with query.skip: ' . $last . ', or narrow the selector.'
+            : $rows . 'there are no more.';
+    }
+
+    /**
+     * The note on a list that came back full and could not be counted: there
+     * may be more rows than the page holds, and the next page starts at
+     * $skip + $limit.
      */
     private static function limitReached(int $limit, int $skip): string
     {

@@ -19,9 +19,9 @@ use GraphQL\Type\Schema;
  *
  * One instance lives for one HTTP request: the schema and the scope are each
  * fetched once, on first use, and so are the list tools' queryable fields
- * (QueryableFields), on the first tools/list. A hidden tool and a missing one
- * are refused alike. An AuthFailure from the gateway becomes the
- * HttpStatusException the transport answers with.
+ * (QueryableFields), on the first tools/list; a count tool names its list's.
+ * A hidden tool and a missing one are refused alike. An AuthFailure from the
+ * gateway becomes the HttpStatusException the transport answers with.
  */
 final class ToolCatalog implements ToolProvider
 {
@@ -66,8 +66,8 @@ final class ToolCatalog implements ToolProvider
     {
         $descriptors = [];
         foreach ($this->visibleTools() as $tool) {
-            if ($tool instanceof GeneratedTool && $tool->listField() !== null) {
-                $tool = $tool->withQueryable($this->queryable()[$tool->listField()] ?? []);
+            if ($tool instanceof GeneratedTool && $tool->queryableList() !== null) {
+                $tool = $tool->withQueryable($this->queryable()[$tool->queryableList()] ?? []);
             }
             $descriptors[] = [
                 'name' => $tool->name(),

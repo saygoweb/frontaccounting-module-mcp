@@ -11,7 +11,12 @@
   `lines`, a customer's `branches` and `contacts`), and each tool's description
   names what it leaves out, ready to paste into `fields`.
 - A list that returns exactly `limit` rows, the default limit or the caller's,
-  carries a note that more may exist and the `query.skip` of the next page.
+  carries a note with the total ("Rows 1–50 of 312"), from graphql's
+  `<entity>Count` for the same selector, and the `query.skip` of the next page;
+  without a count it says more may exist.
+- A `*_count` tool for each `<entity>Count`, described by the list it counts
+  (the same selector fields); `limit`, `skip` and `sort` are accepted and
+  ignored. A Mango field that returns no list gets no default limit.
 - The `query` schema describes `limit`, `skip` and `sort` (`["-date"]` for
   newest first), each list tool's description names the fields its selector
   and sort take (as graphql reports them), and the instructions say how to
