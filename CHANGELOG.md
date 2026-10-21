@@ -7,6 +7,9 @@
 - Tools generated from the caller's GraphQL schema, one per root field, with
   `query`/`selector`/`limit`, an optional `fields` selection, annotations, and
   the `graphql_schema`, `graphql_query` and `graphql_mutate` escape hatch.
+- The default selection leaves out lists of nested objects (an invoice's
+  `lines`, a customer's `branches` and `contacts`), and each tool's description
+  names what it leaves out, ready to paste into `fields`.
 - Read-only and read-and-change connections; read-only hides and refuses
   mutations.
 - Bearer authentication with any GraphQL access or machine token.

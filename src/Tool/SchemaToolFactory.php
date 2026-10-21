@@ -50,7 +50,8 @@ final class SchemaToolFactory
                 $field,
                 $operation,
                 SelectionBuilder::defaultFor($field->getType()),
-                $this->takesMangoQuery($field) ? $this->defaultListLimit : null
+                $this->takesMangoQuery($field) ? $this->defaultListLimit : null,
+                SelectionBuilder::onRequestFor($field->getType())
             );
         }
         ksort($tools, SORT_STRING);

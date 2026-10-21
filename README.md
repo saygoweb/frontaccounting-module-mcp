@@ -66,9 +66,14 @@ claude mcp add --transport http fa https://fa.example.com/modules/mcp/ \
   string), `limit` and `skip`. When `query.limit` is missing, `default_list_limit`
   (50) is applied, and the result says so when exactly that many rows return.
 - **`fields`** (optional string) replaces the default selection set with a
-  GraphQL selection body. By default every scalar field is returned, plus the
-  scalars of each nested object one level deep. The result must stay one
-  operation on the tool's own field.
+  GraphQL selection body. By default every scalar and enum field is returned
+  (lists of them too, such as an invoice's `deliveryIds`), plus the scalars of
+  each single nested object one level deep (a customer's `balance`). Lists of
+  nested objects (an invoice's `lines`, a customer's `branches` and
+  `contacts`) are left out, as they are what makes a page of rows large; the
+  tool's description names each one with its scalars, e.g. "Not returned
+  unless asked for in `fields`: `lines { id invoiceId ... }`". The result must
+  stay one operation on the tool's own field.
 - **Annotations** tell the client what a tool does: `*List`, `me` and
   `recurringDueList` are `readOnlyHint`; `*Delete` is `destructiveHint`;
   `*Update` is `idempotentHint`; `invoiceEmail` and `recurringGenerate` are

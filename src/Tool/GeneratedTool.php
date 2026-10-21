@@ -21,7 +21,12 @@ final class GeneratedTool implements Tool
     public const MUTATION = 'mutation';
 
     public const FIELDS_DESCRIPTION
-        = 'A GraphQL selection set to return instead of the default, e.g. `id name branches { branchCode }`.';
+        = 'A GraphQL selection set to return instead of the default, e.g. `id name contacts { id email }`. The'
+        . ' default is every scalar field and the scalars of each nested object; lists of nested objects (an'
+        . ' invoice\'s `lines`, a customer\'s `contacts`) are left out unless selected here.';
+
+    /** Starts the description's list of what the default selection leaves out. */
+    private const ON_REQUEST = 'Not returned unless asked for in `fields`: ';
 
     /** Mutations that send e-mail. */
     private const OPEN_WORLD = ['invoiceEmail', 'recurringGenerate'];
@@ -30,6 +35,8 @@ final class GeneratedTool implements Tool
     private string $operation;
     private string $defaultSelection;
     private ?int $listLimit;
+    /** @var string[] */
+    private array $onRequest;
     /** Whether `fields` is ours (a selection set) rather than one of the field's arguments. */
     private bool $ownFields;
     private ?array $inputSchema = null;
@@ -38,13 +45,20 @@ final class GeneratedTool implements Tool
      * @param string $operation self::QUERY or self::MUTATION
      * @param string $defaultSelection SelectionBuilder's, '' for a scalar or enum return
      * @param int|null $listLimit the query.limit to inject, or null when the field takes no Mango `query`
+     * @param string[] $onRequest SelectionBuilder::onRequestFor()'s, named in the description
      */
-    public function __construct(FieldDefinition $field, string $operation, string $defaultSelection, ?int $listLimit)
-    {
+    public function __construct(
+        FieldDefinition $field,
+        string $operation,
+        string $defaultSelection,
+        ?int $listLimit,
+        array $onRequest = []
+    ) {
         $this->field = $field;
         $this->operation = $operation;
         $this->defaultSelection = $defaultSelection;
         $this->listLimit = $listLimit;
+        $this->onRequest = $onRequest;
         $this->ownFields = $defaultSelection !== '' && $field->getArg('fields') === null;
     }
 
@@ -65,12 +79,16 @@ final class GeneratedTool implements Tool
         return ucfirst(str_replace('_', ' ', $this->name()));
     }
 
+    /** The field's description (or a generic one), then what `fields` can add to the default selection. */
     public function description(): string
     {
-        if ($this->field->description !== null && $this->field->description !== '') {
-            return $this->field->description;
+        $description = $this->field->description !== null && $this->field->description !== ''
+            ? $this->field->description
+            : ucfirst($this->operation) . ' `' . $this->field->name . '` of the FrontAccounting GraphQL API.';
+        if ($this->ownFields && $this->onRequest !== []) {
+            $description .= "\n\n" . self::ON_REQUEST . '`' . implode('`, `', $this->onRequest) . '`.';
         }
-        return ucfirst($this->operation) . ' `' . $this->field->name . '` of the FrontAccounting GraphQL API.';
+        return $description;
     }
 
     public function inputSchema(): array
