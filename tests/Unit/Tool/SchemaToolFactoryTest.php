@@ -63,7 +63,7 @@ class SchemaToolFactoryTest extends TestCase
         $this->assertTrue($tools['customer_update']->annotations()['idempotentHint']);
         $this->assertTrue($tools['invoice_email']->annotations()['openWorldHint']);
         $this->assertTrue($tools['bank_reconcile']->annotations()['idempotentHint']);
-        $this->assertFalse($tools['bank_reconcile']->annotations()['destructiveHint']);
+        $this->assertTrue($tools['bank_reconcile']->annotations()['destructiveHint']);
         $this->assertTrue($tools['bank_reconcile']->requiresWrite());
         $this->assertFalse($tools['customer_create']->annotations()['destructiveHint']);
         $this->assertFalse($tools['customer_create']->annotations()['readOnlyHint']);

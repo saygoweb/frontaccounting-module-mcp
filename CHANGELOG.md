@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `bank_transaction_list` hint for reconciliation; `bank_reconcile` is idempotent;
+- `bank_transaction_list` hint for reconciliation; `bank_reconcile` is idempotent and destructive;
   CONNECTING.md: reconciling a bank statement.
 
 ## 1.1.1 - 2026-10-22

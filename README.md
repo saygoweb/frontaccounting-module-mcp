@@ -19,11 +19,14 @@ it looks like this (names are examples):
 
 ```
 customer_list, customer_count, customer_get, customer_create, customer_update,
-bank_transaction_list, bank_reconciliation, bank_reconcile, ...
+bank_transaction_list, bank_reconciliation, bank_reconcile, ...   (see below)
 sales_order_list, sales_order_create, ...
 recurring_due_list, recurring_generate     (only where sgw_sales is active)
 graphql_schema, graphql_query, graphql_mutate
 ```
+
+The bank tools need a GraphQL module with bank reconciliation
+(`bankTransactionList`, `bankReconcile`); with an older one they are not listed.
 
 ## Requirements
 

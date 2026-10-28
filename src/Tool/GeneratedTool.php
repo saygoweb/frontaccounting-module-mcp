@@ -82,6 +82,12 @@ final class GeneratedTool implements Tool
     /** Mutations a repeat of which changes nothing, besides every *Update. */
     private const IDEMPOTENT = ['bankReconcile'];
 
+    /**
+     * Mutations a client should confirm, besides every *Delete: bankReconcile can untick
+     * entries and replaces the account's last reconciliation.
+     */
+    private const DESTRUCTIVE = ['bankReconcile'];
+
     private FieldDefinition $field;
     private string $operation;
     private string $defaultSelection;
@@ -275,7 +281,7 @@ final class GeneratedTool implements Tool
         $name = $this->field->name;
         return [
             'readOnlyHint' => false,
-            'destructiveHint' => substr($name, -6) === 'Delete',
+            'destructiveHint' => substr($name, -6) === 'Delete' || in_array($name, self::DESTRUCTIVE, true),
             'idempotentHint' => substr($name, -6) === 'Update' || in_array($name, self::IDEMPOTENT, true),
             'openWorldHint' => in_array($name, self::OPEN_WORLD, true),
         ];
