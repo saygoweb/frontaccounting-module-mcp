@@ -513,6 +513,23 @@ class GeneratedToolTest extends TestCase
         $this->assertStringNotContainsString('{"voided": false}', $delivery->description());
     }
 
+    public function testBankTransactionListSaysHowToFindWhatToReconcile(): void
+    {
+        $tool = $this->listToolOf(
+            'bankTransactionList',
+            'bankAccountId: ID reconciled: String voided: Boolean date: String'
+        );
+        $text = $tool->withQueryable(['id', 'bankAccountId', 'reconciled', 'voided', 'date'])->description();
+
+        $this->assertStringContainsString(
+            'Unreconciled up to a statement: selector {"bankAccountId": "<account>", "reconciled": null, "voided":'
+            . ' false, "date": {"$lte": "<statement date>"}}. A statement\'s entries: {"reconciled": "<statement'
+            . ' date>"}.',
+            $text
+        );
+        $this->assertStringNotContainsString('Unreconciled', $tool->withQueryable(['id', 'date'])->description());
+    }
+
     public function testACountToolCarriesNoHint(): void
     {
         $count = $this->tool('customer_count')->withQueryable(['id']);

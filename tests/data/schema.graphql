@@ -3,6 +3,9 @@
 # follow the real API; where a field is simplified or added to pin a rule, a
 # comment says so.
 
+"""A calendar date, as ISO 8601 `YYYY-MM-DD`."""
+scalar Date
+
 """Mango query: selector is a JSON-encoded Mango selector string."""
 input MangoInput {
   action: String
@@ -93,6 +96,9 @@ type Mutation {
   tokenRefresh(refreshToken: String!): AuthPayload!
   """Revoke one of your refresh tokens, or all of them when none is given."""
   tokenRevoke(refreshToken: String): Boolean!
+  # Added to pin the idempotent and destructive rules for a mutation not named
+  # *Update or *Delete.
+  bankReconcile(input: BankReconcileInput!): BankReconciliation!
   customerCreate(input: [CustomerCreateInput!]!): [Customer!]!
   customerUpdate(input: [CustomerUpdateInput!]!): [Customer!]!
   customerDelete(id: [ID!]!): [Customer!]!
@@ -100,4 +106,17 @@ type Mutation {
   # Boolean! pins the scalar-return rule, and `fields` the name-collision rule.
   """Email invoices through FrontAccounting's invoice report, to each customer's invoice (else general) contact."""
   invoiceEmail(id: [ID!]!, fields: String): Boolean!
+}
+
+input BankReconcileInput {
+  bankAccountId: ID!
+  statementDate: Date!
+  endingBalance: Float!
+  reconcile: [ID!]
+  unreconcile: [ID!]
+}
+
+type BankReconciliation {
+  bankAccountId: ID!
+  difference: Float
 }

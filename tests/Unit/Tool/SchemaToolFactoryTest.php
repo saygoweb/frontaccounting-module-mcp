@@ -47,8 +47,8 @@ class SchemaToolFactoryTest extends TestCase
     public function testNamesQueriesThenMutationsEachSorted(): void
     {
         $this->assertSame(
-            ['customer_count', 'customer_list', 'me', 'recurring_due_list', 'customer_create', 'customer_delete',
-                'customer_update', 'invoice_email'],
+            ['customer_count', 'customer_list', 'me', 'recurring_due_list', 'bank_reconcile', 'customer_create',
+                'customer_delete', 'customer_update', 'invoice_email'],
             array_keys(self::tools())
         );
     }
@@ -62,6 +62,9 @@ class SchemaToolFactoryTest extends TestCase
         $this->assertTrue($tools['customer_delete']->annotations()['destructiveHint']);
         $this->assertTrue($tools['customer_update']->annotations()['idempotentHint']);
         $this->assertTrue($tools['invoice_email']->annotations()['openWorldHint']);
+        $this->assertTrue($tools['bank_reconcile']->annotations()['idempotentHint']);
+        $this->assertTrue($tools['bank_reconcile']->annotations()['destructiveHint']);
+        $this->assertTrue($tools['bank_reconcile']->requiresWrite());
         $this->assertFalse($tools['customer_create']->annotations()['destructiveHint']);
         $this->assertFalse($tools['customer_create']->annotations()['readOnlyHint']);
         $this->assertFalse($tools['customer_create']->annotations()['openWorldHint']);

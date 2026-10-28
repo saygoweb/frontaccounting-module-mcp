@@ -53,6 +53,34 @@ php bin/fa-token revoke --company 0 <jti>
 
 The access token stops working at once and the next refresh fails.
 
+## Reconciling a bank statement
+
+These tools need a GraphQL module with bank reconciliation (`bankTransactionList`,
+`bankReconcile`); with an older one they are not listed.
+
+With a role that has *Bank transactions view* (`SA_BANKTRANSVIEW`) and *Bank
+reconciliation* (`SA_RECONCILE`), Claude can reconcile an account against a
+statement (a PDF or CSV you give it), as FrontAccounting's Reconcile Bank Account
+screen does. Finding the account with `bank_account_list` also needs *Customer
+payments* (`SA_SALESPAYMNT`); without it, give Claude the bank account's id.
+
+1. `bank_account_list` to find the account; `bank_reconciliation` with the
+   statement's date, to check the statement's opening balance against
+   `beginningBalance`.
+2. `bank_transaction_list` with `{"bankAccountId": "<id>", "reconciled": null,
+   "voided": false, "date": {"$lte": "<statement date>"}}` for the entries to tick.
+   It returns a page at a time: keep paging with `query.skip`, as the result's
+   note says (or check `bank_transaction_count` first), until every entry up to
+   the statement date is in hand.
+3. Match statement lines to entries (amount, date, counterparty, memo).
+4. `bank_reconcile` with the statement date, its closing balance as
+   `endingBalance`, and the matched entry ids in `reconcile`. All or nothing;
+   repeating it changes nothing. It is marked destructive (it can untick entries
+   and replaces the account's last reconciliation), so your client may ask you to
+   confirm it.
+5. `difference` in the result is 0 when the statement is reconciled. Report the
+   statement lines with no entry, and the entries left unticked; nothing is created.
+
 ## Checking the server
 
 ```
