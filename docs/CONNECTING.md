@@ -53,6 +53,25 @@ php bin/fa-token revoke --company 0 <jti>
 
 The access token stops working at once and the next refresh fails.
 
+## Reconciling a bank statement
+
+With a role that has *Bank transactions view* (`SA_BANKTRANSVIEW`) and *Bank
+reconciliation* (`SA_RECONCILE`), Claude can reconcile an account against a
+statement (a PDF or CSV you give it), as FrontAccounting's Reconcile Bank Account
+screen does:
+
+1. `bank_account_list` to find the account; `bank_reconciliation` with the
+   statement's date, to check the statement's opening balance against
+   `beginningBalance`.
+2. `bank_transaction_list` with `{"bankAccountId": "<id>", "reconciled": null,
+   "voided": false, "date": {"$lte": "<statement date>"}}` for the entries to tick.
+3. Match statement lines to entries (amount, date, counterparty, memo).
+4. `bank_reconcile` with the statement date, its closing balance as
+   `endingBalance`, and the matched entry ids in `reconcile`. All or nothing;
+   repeating it changes nothing.
+5. `difference` in the result is 0 when the statement is reconciled. Report the
+   statement lines with no entry, and the entries left unticked; nothing is created.
+
 ## Checking the server
 
 ```

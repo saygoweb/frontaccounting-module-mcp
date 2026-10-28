@@ -15,8 +15,8 @@ use PHPUnit\Framework\TestCase;
 class ToolCatalogTest extends TestCase
 {
     private const GENERATED = [
-        'customer_count', 'customer_list', 'me', 'recurring_due_list', 'customer_create', 'customer_delete',
-        'customer_update', 'invoice_email',
+        'customer_count', 'customer_list', 'me', 'recurring_due_list', 'bank_reconcile', 'customer_create',
+        'customer_delete', 'customer_update', 'invoice_email',
     ];
 
     private static function gateway(?string $scope = 'write'): FakeGraphQlGateway

@@ -93,6 +93,8 @@ type Mutation {
   tokenRefresh(refreshToken: String!): AuthPayload!
   """Revoke one of your refresh tokens, or all of them when none is given."""
   tokenRevoke(refreshToken: String): Boolean!
+  # Added to pin the idempotent rule for a mutation not named *Update.
+  bankReconcile(input: BankReconcileInput!): BankReconciliation!
   customerCreate(input: [CustomerCreateInput!]!): [Customer!]!
   customerUpdate(input: [CustomerUpdateInput!]!): [Customer!]!
   customerDelete(id: [ID!]!): [Customer!]!
@@ -100,4 +102,17 @@ type Mutation {
   # Boolean! pins the scalar-return rule, and `fields` the name-collision rule.
   """Email invoices through FrontAccounting's invoice report, to each customer's invoice (else general) contact."""
   invoiceEmail(id: [ID!]!, fields: String): Boolean!
+}
+
+input BankReconcileInput {
+  bankAccountId: ID!
+  statementDate: String!
+  endingBalance: Float!
+  reconcile: [ID!]
+  unreconcile: [ID!]
+}
+
+type BankReconciliation {
+  bankAccountId: ID!
+  difference: Float
 }

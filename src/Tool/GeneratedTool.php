@@ -60,6 +60,14 @@ final class GeneratedTool implements Tool
         'deliveryList' => [
             [['voided'], 'Without voided deliveries: selector {"voided": false}.'],
         ],
+        'bankTransactionList' => [
+            [
+                ['bankAccountId', 'reconciled', 'voided', 'date'],
+                'Unreconciled up to a statement: selector {"bankAccountId": "<account>", "reconciled": null, "voided":'
+                . ' false, "date": {"$lte": "<statement date>"}}. A statement\'s entries: {"reconciled": "<statement'
+                . ' date>"}.',
+            ],
+        ],
     ];
 
     /** The input type of a list's `query` argument. */
@@ -70,6 +78,9 @@ final class GeneratedTool implements Tool
 
     /** Mutations that send e-mail. */
     private const OPEN_WORLD = ['invoiceEmail', 'recurringGenerate'];
+
+    /** Mutations a repeat of which changes nothing, besides every *Update. */
+    private const IDEMPOTENT = ['bankReconcile'];
 
     private FieldDefinition $field;
     private string $operation;
@@ -265,7 +276,7 @@ final class GeneratedTool implements Tool
         return [
             'readOnlyHint' => false,
             'destructiveHint' => substr($name, -6) === 'Delete',
-            'idempotentHint' => substr($name, -6) === 'Update',
+            'idempotentHint' => substr($name, -6) === 'Update' || in_array($name, self::IDEMPOTENT, true),
             'openWorldHint' => in_array($name, self::OPEN_WORLD, true),
         ];
     }

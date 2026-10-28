@@ -71,7 +71,11 @@ class CatalogAgainstRealSchemaTest extends TestCase
     public function testListHasTheGeneratedToolsAndNotTheExcludedOnes(): void
     {
         $names = array_column($this->catalog('write')->listTools(), 'name');
-        foreach (['customer_list', 'sales_order_create', 'invoice_email', 'recurring_due_list'] as $name) {
+        $present = [
+            'customer_list', 'sales_order_create', 'invoice_email', 'recurring_due_list',
+            'bank_transaction_list', 'bank_transaction_count', 'bank_reconciliation', 'bank_reconcile',
+        ];
+        foreach ($present as $name) {
             $this->assertContains($name, $names);
         }
         foreach (['login', 'token_refresh', 'token_revoke', 'api_version'] as $name) {
